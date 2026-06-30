@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ArticleHub – Editorial Dashboard</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+</head>
+<body>
+
+<div class="app-shell">
+  <!-- ═══════════════ TOPBAR ═══════════════ -->
+  <header class="topbar">
+    <!-- new code for hamburger menu -->
+       <button class="topbar-btn" id="hamburger-btn" style="display:none" onclick="document.querySelector('.sidebar').classList.toggle('open');
+             document.getElementById('sidebar-overlay').classList.toggle('open')">
+        <i class="ti ti-menu-2"></i>
+      </button>
+    <!-- code end -->
+    <div class="topbar-logo">
+      <span class="logo-icon">A</span>
+      <span class="brand-name">ArticleHub</span>
+    </div>
+    <div class="topbar-search">
+      <i class="ti ti-search"></i>
+      <input type="text" placeholder="Search articles, messages, users…">
+    </div>
+    <div class="topbar-actions">
+      <button class="topbar-btn" title="Notifications" style="position:relative" onclick="App.navigateTo('notifications');
+                 document.querySelectorAll('.sidebar-item[data-page]').forEach(i=>i.classList.remove('active'));
+                 document.querySelector('[data-page=notifications]').classList.add('active'); 
+                 App.loadNotifications();">
+        <i class="ti ti-bell"></i>
+        <span id="notif-badge" style="display:none;position:absolute;top:5px;right:5px;
+                 background:var(--accent-2);color:#fff;font-size:9px;font-weight:700;
+                 border-radius:99px;min-width:16px;height:16px;
+                 align-items:center;justify-content:center;font-family:var(--font-head)">0
+        </span>
+      </button>
+      <!-- Admin Settings Button -->
+      <button class="topbar-btn" id="admin-settings-btn" title="Admin Settings" 
+        onclick="App.openAdminSettingsModal()" style="display:none">
+        <i class="ti ti-settings"></i>
+      </button>
+      <!-- Theme toggle lives here — not in a separate wrapper -->
+      <!-- <button class="topbar-btn" id="theme-toggle" title="Toggle theme">
+        <i class="ti ti-sun"></i>
+      </button> -->
+      <!-- Avatar — initials rendered by App.renderCurrentUser() -->
+      <div class="avatar" title="My Profile" onclick="App.openProfileModal()" style="cursor:pointer"></div>
+      <button class="topbar-btn" id="logout-btn" title="Logout">
+        <i class="ti ti-logout"></i>
+      </button>
+    </div>
+  </header>
+  <!-- ═══════════════ LEFT SIDEBAR ═══════════════ -->
+  <aside class="sidebar">
+    <span class="sidebar-section-label">Main</span>
+    <div class="sidebar-item active" data-page="feed">
+      <i class="ti ti-layout-dashboard"></i>
+      <span class="item-label">Feed</span>
+    </div>
+    <div class="sidebar-item" data-page="notifications">
+      <i class="ti ti-bell"></i>
+      <span class="item-label">Notifications</span>
+      <span class="sidebar-badge" id="sidebar-notif-badge" style="display:none">0</span>
+    </div>
+    <div class="sidebar-item" data-page="analytics">
+      <i class="ti ti-chart-bar"></i>
+      <span class="item-label">Analytics</span>
+    </div>
+    <div class="sidebar-item" data-page="search">
+      <i class="ti ti-search"></i>
+      <span class="item-label">Search</span>
+    </div>
+
+    <span class="sidebar-section-label">Groups</span>
+    <div id="group-list">
+      <!-- Groups loaded dynamically by App.loadGroups() -->
+    </div>
+    <div style="margin-top:8px">
+      <div class="sidebar-item" id="create-group-btn">
+        <i class="ti ti-plus"></i>
+        <span class="item-label">Create Group</span>
+      </div>
+    </div>
+    <div class="divider" style="margin:12px 0"></div>
+  </aside>
+  <!-- ═══════════════ CENTER – FEED ═══════════════ -->
+  <main class="center-panel">
+    <!-- ── PAGE: FEED ── -->
+    <div id="page-feed" class="page active">
+      <div class="channel-header">
+        <i class="ti ti-hash" style="color:var(--text-muted);font-size:18px"></i>
+        <span class="channel-title" id="channel-title"></span>
+        <div class="channel-actions">
+          <button class="topbar-btn" id="channel-search-btn"
+            title="Search in channel" onclick="App.toggleChannelSearch()">
+            <i class="ti ti-search"></i>
+          </button>
+          <button class="topbar-btn" title="Group Settings" id="group-settings-btn"
+            onclick="App.openManageGroupModal()" style="display:none">
+            <i class="ti ti-settings"></i>
+          </button>
+          <button class="topbar-btn" title="Members">
+            <i class="ti ti-users"></i>
+          </button>
+        </div>
+      </div>
+      <!-- Channel search panel (hidden by default, toggled by App.toggleChannelSearch()) -->
+      <div id="channel-search-panel" style="display:none;
+           background:var(--bg-primary);border-bottom:1px solid var(--border);
+           padding:10px 16px;flex-shrink:0">
+        <div style="position:relative">
+          <i class="ti ti-search" style="position:absolute;left:12px;top:50%;
+             transform:translateY(-50%);color:var(--text-muted);
+             font-size:15px;pointer-events:none"></i>
+          <input id="channel-search-input" class="form-input" type="text"
+            placeholder="Search articles, messages, members in this group…"
+            style="padding-left:38px;padding-right:100px"
+            oninput="App.runChannelSearch(this.value.trim())">
+          <span id="channel-search-count"
+            style="display:none;position:absolute;right:36px;top:50%;
+                   transform:translateY(-50%);font-size:11px;
+                   color:var(--text-muted);pointer-events:none;white-space:nowrap"></span>
+          <button id="channel-search-clear" onclick="App.clearChannelSearch()"
+            style="display:none;position:absolute;right:10px;top:50%;
+                   transform:translateY(-50%);background:none;border:none;
+                   cursor:pointer;color:var(--text-muted);font-size:20px;line-height:1">×</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+          <button class="csr-pill active" onclick="App.setChannelSearchFilter('all',this)">All</button>
+          <button class="csr-pill" onclick="App.setChannelSearchFilter('articles',this)">
+            <i class="ti ti-newspaper"></i> Articles
+          </button>
+          <button class="csr-pill" onclick="App.setChannelSearchFilter('messages',this)">
+            <i class="ti ti-message-circle"></i> Messages
+          </button>
+          <button class="csr-pill" onclick="App.setChannelSearchFilter('members',this)">
+            <i class="ti ti-users"></i> Members
+          </button>
+        </div>
+      </div>
+      <div id="channel-search-results" style="display:none;background:var(--bg-card); border-bottom:1px solid var(--border); max-height:360px;overflow-y:auto;flex-shrink:0">
+      </div>
+      <div class="tab-bar">
+        <div class="tab active" data-tab="tab-articles">📰 Articles</div>
+        <div class="tab" data-tab="tab-chat">💬 Chat</div>
+      </div>
+
+      <!-- Share bar (Articles tab only) -->
+      <div class="share-article-bar" id="share-article-bar">
+        <i class="ti ti-link" style="color:var(--accent);font-size:17px;flex-shrink:0"></i>
+        <input id="article-url-input" type="url" placeholder="Paste article URL to share with the group…">
+        <button id="share-article-btn" class="btn-primary"
+          style="padding:6px 14px;font-size:12.5px;white-space:nowrap">Share</button>
+      </div>
+      <div id="og-preview" style="display:none;padding:8px 20px 4px;"></div>
+
+      <!-- Article filter bar -->
+      <div id="article-filter-bar"
+        style="padding:6px 20px;background:var(--bg-primary);border-bottom:1px solid var(--border);
+               display:flex;align-items:center;gap:8px;flex-shrink:0">
+        <div style="position:relative;flex:1;max-width:280px">
+          <input id="article-search-input" class="form-input"
+            placeholder="Search articles in this group…"
+            style="font-size:12px;padding:6px 10px 6px 30px;height:30px"
+            oninput="App.filterArticles(this.value)">
+          <i class="ti ti-search"
+            style="position:absolute;left:9px;top:50%;transform:translateY(-50%);
+                   font-size:13px;color:var(--text-muted);pointer-events:none"></i>
+        </div>
+        <button id="show-pinned-btn" onclick="App.togglePinnedOnly(this)" style="display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:6px;
+                 border:1px solid var(--border);background:transparent;color:var(--text-muted);
+                 cursor:pointer;font-size:12px;white-space:nowrap;transition:all 0.15s">
+          <i class="ti ti-pin"></i> Pinned only 
+        </button>
+      </div>
+
+      <!-- article pin code -->
+      <!--<i class="ti ti-pin" style="color:var(--accent-2);font-size:13px;flex-shrink:0"></i>-->
+
+      <!-- Articles tab — all content rendered by App.loadArticles() -->
+      <div id="tab-articles" class="tab-panel feed">
+        <!-- new code for loading articles in article feed -->
+          <div id="pinned-articles-section"></div>
+          <div id="unpinned-articles-feed"></div>        
+      </div>
+
+      <!-- Chat tab — all content rendered by App.loadMessages() -->
+      <div id="tab-chat" class="tab-panel feed" style="display:none">
+        <div id="msg-feed"></div>
+        <div id="typing-indicator" class="typing-indicator" style="display:none;padding:0 0 4px 0">
+          <div class="typing-dots">
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Message input bar -->
+      <div class="message-input-bar" id="message-input-bar">
+        <div class="input-wrapper">
+          <textarea id="msg-input" rows="1" placeholder="Message…"></textarea>
+          <div class="input-actions">
+            <button class="input-btn" id="emoji-btn" title="Emoji"
+              onclick="App.toggleMsgEmojiPicker(event)">
+              <i class="ti ti-mood-smile"></i>
+            </button>
+            <button class="input-btn" title="Attach file"
+              onclick="App.openModal('modal-file-attach')">
+              <i class="ti ti-paperclip"></i>
+            </button>
+            <button class="send-btn" id="send-btn" title="Send">
+              <i class="ti ti-send"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PAGE: NOTIFICATIONS ── -->
+    <div id="page-notifications" class="page">
+      <div class="channel-header">
+        <i class="ti ti-bell" style="color:var(--text-muted);font-size:18px"></i>
+        <span class="channel-title">Notifications</span>
+        <button class="action-btn channel-sub" style="margin-left:auto"
+          onclick="NotificationsAPI.markAllRead().then(()=>{App.loadNotifications();App.loadNotificationBadge();})">
+          Mark all read
+        </button>
+      </div>
+      <div id="notifications-feed" class="feed" style="gap:4px">
+        <!-- Notifications loaded dynamically by App.loadNotifications() -->
+      </div>
+    </div>
+
+    <!-- ── PAGE: ANALYTICS ── -->
+    <div id="page-analytics" class="page">
+      <div class="channel-header">
+        <i class="ti ti-chart-bar" style="color:var(--text-muted);font-size:18px"></i>
+        <span class="channel-title">Analytics</span>
+        <span class="channel-sub" style="margin-left:auto;color:var(--text-muted);font-size:12px">Last 30 days</span>
+      </div>
+      <div class="feed">
+        <div class="analytics-grid">
+          <div class="analytic-card">
+            <div class="val" id="stat-views" style="color:var(--accent)">–</div>
+            <div class="lbl">Total Article Views</div>
+          </div>
+          <div class="analytic-card">
+            <div class="val" id="stat-articles" style="color:var(--accent-3)">–</div>
+            <div class="lbl">Articles This Month</div>
+          </div>
+          <div class="analytic-card">
+            <div class="val" id="stat-messages" style="color:var(--accent-2)">–</div>
+            <div class="lbl">Messages This Month</div>
+          </div>
+          <div class="analytic-card">
+            <div class="val" id="stat-users" style="color:#f9ca24">–</div>
+            <div class="lbl">Active Members</div>
+          </div>
+        </div>
+
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 20px">
+          <div style="font-family:var(--font-head);font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:16px;letter-spacing:0.5px">MOST ACTIVE GROUPS</div>
+          <div id="groups-chart" class="bar-chart">
+            <!-- Loaded dynamically by App.loadAnalytics() -->
+          </div>
+        </div>
+
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 20px">
+          <div style="font-family:var(--font-head);font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:14px;letter-spacing:0.5px">TOP SHARED ARTICLES</div>
+          <div id="top-articles-list" style="display:flex;flex-direction:column;gap:0">
+            <!-- Loaded dynamically by App.loadAnalytics() -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PAGE: SEARCH ── -->
+    <div id="page-search" class="page">
+      <div class="channel-header">
+        <i class="ti ti-search" style="color:var(--text-muted);font-size:18px"></i>
+        <span class="channel-title">Search</span>
+      </div>
+      <div class="feed">
+        <div style="display:flex;gap:10px;margin-bottom:8px">
+          <div style="flex:1;position:relative">
+            <input id="global-search-input" class="form-input"
+              placeholder="Search articles, messages, members…"
+              style="padding-left:36px" oninput="App.doSearch(this.value.trim())">
+            <i class="ti ti-search"
+              style="position:absolute;left:12px;top:50%;transform:translateY(-50%);
+                     color:var(--text-muted);font-size:15px;pointer-events:none"></i>
+          </div>
+          <select id="search-type-filter" class="form-input" style="width:140px"
+            onchange="App.doSearch(document.getElementById('global-search-input').value.trim())">
+            <option value="all">All types</option>
+            <option value="articles">Articles</option>
+            <option value="members">Members</option>
+            <option value="groups">Groups</option>
+            <option value="pinned">Pinned only</option>
+          </select>
+        </div>
+        <div id="search-results-container" class="search-results" style="transition:opacity 0.2s">
+          <div class="empty-state" style="padding:30px">
+            <i class="ti ti-search"></i>
+            <p>Type to search articles, members, groups…</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ═══════════════ RIGHT PANEL ═══════════════ -->
+  <aside class="right-panel">
+    <div>
+      <div class="panel-section-title">Online Now</div>
+      <div id="members-list">
+        <!-- Members loaded dynamically by App.loadRightPanelMembers() -->
+      </div>
+      <button class="action-btn"
+        style="font-size:12px;color:var(--accent);padding:4px 0;margin-top:4px"
+        data-modal="modal-members">
+        <i class="ti ti-users"></i> View all members
+      </button>
+    </div>
+    <div class="divider"></div>
+  </aside>
+
+</div><!-- end .app-shell -->
+
+<!-- ═══════════════ CONTEXT MENU ═══════════════ -->
+<div id="ctx-menu" class="ctx-menu">  
+  <div class="ctx-item" onclick="App.ctxPin()"><i class="ti ti-pin"></i> Pin / Unpin</div>
+  <div class="ctx-item" onclick="App.ctxForward()"><i class="ti ti-share"></i> Forward to group</div>
+  <div class="ctx-item" onclick="App.ctxCopy()"><i class="ti ti-copy"></i> Copy link</div>
+  <div class="ctx-item danger" onclick="App.ctxDelete()"><i class="ti ti-trash"></i> Delete</div>
+   <div class="ctx-item" onclick="App.shareOnFacebook(App.ctxTarget && App.ctxTarget.id)"><i class="ti ti-brand-facebook"></i> Share on Facebook</div>
+  <!-- <div class="ctx-item danger" onclick="App.ctxDelete()"><i class="ti ti-trash"></i> Delete</div> -->
+</div>
+
+<!-- ═══════════════ EMOJI PICKERS ═══════════════ -->
+<div id="emoji-picker" class="emoji-row" style="display:none;position:fixed">
+  <div class="emoji-btn" onclick="App.pickEmoji('👍')">👍</div>
+  <div class="emoji-btn" onclick="App.pickEmoji('❤️')">❤️</div>
+  <div class="emoji-btn" onclick="App.pickEmoji('😂')">😂</div>
+  <div class="emoji-btn" onclick="App.pickEmoji('😮')">😮</div>
+  <div class="emoji-btn" onclick="App.pickEmoji('🔥')">🔥</div>
+  <div class="emoji-btn" onclick="App.pickEmoji('👏')">👏</div>
+</div>
+
+<div id="msg-emoji-picker" class="emoji-row"
+  style="display:none;position:fixed;flex-wrap:wrap;width:280px;gap:4px;padding:10px">
+  <div style="width:100%;font-size:10px;color:var(--text-muted);font-weight:600;
+              letter-spacing:0.5px;margin-bottom:4px">INSERT EMOJI</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('👍')">👍</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('❤️')">❤️</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('😂')">😂</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('😮')">😮</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('🔥')">🔥</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('👏')">👏</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('😊')">😊</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('🎉')">🎉</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('💡')">💡</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('📌')">📌</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('✅')">✅</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('⚡')">⚡</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('🙏')">🙏</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('👀')">👀</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('💬')">💬</div>
+  <div class="emoji-btn" onclick="App.insertMsgEmoji('📰')">📰</div>
+</div>
+
+<!-- ═══════════════ MODALS ═══════════════ -->
+
+<!-- Create Group Modal -->
+<div id="modal-create-group" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Create New Group</span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <form id="create-group-form">
+      <div class="form-group">
+        <label class="form-label">Group Name</label>
+        <input id="group-name-input" class="form-input" type="text"
+          placeholder="e.g. Breaking News Team" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <textarea id="group-desc-input" class="form-input" rows="3"
+          placeholder="What is this group for?" style="resize:none"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Add Members</label>
+        <div id="member-select-list"
+          style="max-height:150px;overflow-y:auto;border:1px solid var(--border);
+                 border-radius:var(--radius-sm);padding:8px 12px;background:var(--bg-secondary)">
+          <div style="color:var(--text-muted);font-size:12px">Loading members…</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-ghost modal-close">Cancel</button>
+        <button type="submit" class="btn-primary">Create Group</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Forward Modal -->
+<div id="modal-forward" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Forward to Groups</span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <form id="forward-form">
+      <div class="form-group">
+        <label class="form-label">Select Groups</label>
+        <div id="forward-group-list" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">
+          <div style="color:var(--text-muted);font-size:12px">Loading groups…</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-ghost modal-close">Cancel</button>
+        <button type="submit" class="btn-primary">Forward</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Members Modal -->
+<div id="modal-members" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="members-modal-title">Group Members</span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="margin-bottom:12px">
+      <input class="form-input" id="member-search-input"
+        placeholder="Search members…" oninput="App.filterMembersList(this.value)">
+    </div>
+    <div id="modal-members-list"
+      style="display:flex;flex-direction:column;gap:4px;max-height:300px;overflow-y:auto">
+      <div style="color:var(--text-muted);font-size:12px;padding:8px 0">Loading…</div>
+    </div>
+    <div id="add-member-section" style="margin-top:14px;display:none">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;
+                  text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">Add Member</div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1;position:relative">
+          <input class="form-input" id="invite-user-search"
+            placeholder="Search user by name or email…"
+            oninput="App.searchUsersToInvite(this.value)" style="padding-left:34px">
+          <i class="ti ti-search"
+            style="position:absolute;left:11px;top:50%;transform:translateY(-50%);
+                   color:var(--text-muted);font-size:15px;pointer-events:none"></i>
+        </div>
+        <button class="btn-primary" style="padding:8px 14px;white-space:nowrap"
+          onclick="App.confirmAddMember()">
+          <i class="ti ti-user-plus"></i> Add
+        </button>
+      </div>
+      <div id="invite-search-results"
+        style="margin-top:8px;max-height:150px;overflow-y:auto;
+               border:1px solid var(--border);border-radius:var(--radius-sm);display:none"></div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <button id="toggle-add-member-btn" class="btn-ghost"
+        style="display:flex;align-items:center;gap:6px" onclick="App.toggleAddMember()">
+        <i class="ti ti-user-plus"></i> Add Member
+      </button>
+      <button class="btn-ghost modal-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Profile Modal -->
+<div id="modal-profile" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">My Profile</span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;
+                padding:14px;background:var(--bg-hover);border-radius:var(--radius)">
+      <div class="avatar" id="profile-avatar" style="width:48px;height:48px;font-size:16px"></div>
+      <div>
+        <div id="profile-name" style="font-family:var(--font-head);font-size:15px;font-weight:700">–</div>
+        <div id="profile-email" style="font-size:12px;color:var(--text-muted)">–</div>
+        <div id="profile-role-badge" style="margin-top:4px"></div>
+      </div>
+    </div>
+    <form id="profile-form">
+      <div class="form-group">
+        <label class="form-label">Full Name</label>
+        <div style="position:relative">
+          <input id="profile-name-input" class="form-input" type="text"
+            placeholder="Your name" style="padding-left:34px">
+          <i class="ti ti-user"
+            style="position:absolute;left:11px;top:50%;transform:translateY(-50%);
+                   color:var(--text-muted);font-size:15px;pointer-events:none"></i>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Job Title</label>
+        <div style="position:relative">
+          <input id="profile-title-input" class="form-input" type="text"
+            placeholder="e.g. Senior Editor" style="padding-left:34px">
+          <i class="ti ti-briefcase"
+            style="position:absolute;left:11px;top:50%;transform:translateY(-50%);
+                   color:var(--text-muted);font-size:15px;pointer-events:none"></i>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Organization</label>
+        <div style="position:relative">
+          <input id="profile-org-input" class="form-input" type="text"
+            placeholder="Your newsroom" style="padding-left:34px">
+          <i class="ti ti-building"
+            style="position:absolute;left:11px;top:50%;transform:translateY(-50%);
+                   color:var(--text-muted);font-size:15px;pointer-events:none"></i>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-ghost modal-close">Cancel</button>
+        <button type="submit" class="btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Change Password Modal -->
+<div id="modal-change-password" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Change Password</span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <form id="change-password-form">
+      <div class="form-group">
+        <label class="form-label">Current Password</label>
+        <div style="position:relative">
+          <input class="form-input" id="cur-password" type="password"
+            placeholder="Current password" style="padding-right:42px">
+          <button type="button" onclick="App.togglePasswordVisibility('cur-password',this)"
+            style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                   background:none;border:none;cursor:pointer;color:var(--text-muted);
+                   padding:4px;display:flex;align-items:center;font-size:16px">
+            <i class="ti ti-eye"></i>
+          </button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">New Password</label>
+        <div style="position:relative">
+          <input class="form-input" id="new-password" type="password"
+            placeholder="Min. 8 characters" style="padding-right:42px">
+          <button type="button" onclick="App.togglePasswordVisibility('new-password',this)"
+            style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                   background:none;border:none;cursor:pointer;color:var(--text-muted);
+                   padding:4px;display:flex;align-items:center;font-size:16px">
+            <i class="ti ti-eye"></i>
+          </button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm New Password</label>
+        <div style="position:relative">
+          <input class="form-input" id="confirm-password" type="password"
+            placeholder="Re-enter new password" style="padding-right:42px">
+          <button type="button" onclick="App.togglePasswordVisibility('confirm-password',this)"
+            style="position:absolute;right:10px;top:50%;transform:translateY(-50%);
+                   background:none;border:none;cursor:pointer;color:var(--text-muted);
+                   padding:4px;display:flex;align-items:center;font-size:16px">
+            <i class="ti ti-eye"></i>
+          </button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-ghost modal-close">Cancel</button>
+        <button type="submit" class="btn-primary">Update Password</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Manage Group Modal -->
+<div id="modal-manage-group" class="modal-overlay">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <span class="modal-title"><i class="ti ti-settings" style="color:var(--accent)"></i> Group Settings</span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;padding:14px;
+                background:var(--bg-hover);border-radius:var(--radius);margin-bottom:20px">
+      <div id="manage-group-avatar"
+        style="width:48px;height:48px;border-radius:12px;background:var(--accent-soft);
+               color:var(--accent);display:flex;align-items:center;justify-content:center;
+               font-size:18px;font-weight:700;font-family:var(--font-head);flex-shrink:0"></div>
+      <div>
+        <div id="manage-group-title"
+          style="font-family:var(--font-head);font-size:16px;font-weight:700"></div>
+        <div id="manage-group-meta"
+          style="font-size:12px;color:var(--text-muted);margin-top:2px"></div>
+      </div>
+    </div>
+    <form id="manage-group-form">
+      <div class="form-group">
+        <label class="form-label">Group Name</label>
+        <div style="position:relative">
+          <input id="manage-group-name" class="form-input" type="text"
+            placeholder="Group name" style="padding-left:36px" required>
+          <i class="ti ti-users"
+            style="position:absolute;left:12px;top:50%;transform:translateY(-50%);
+                   color:var(--text-muted);font-size:15px;pointer-events:none"></i>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <textarea id="manage-group-desc" class="form-input" rows="3"
+          placeholder="What is this group for?" style="resize:none"></textarea>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:20px">
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);
+                    border-radius:var(--radius-sm);padding:12px;text-align:center">
+          <div id="manage-stat-members"
+            style="font-family:var(--font-head);font-size:22px;font-weight:700;color:var(--accent)">0</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Members</div>
+        </div>
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);
+                    border-radius:var(--radius-sm);padding:12px;text-align:center">
+          <div id="manage-stat-articles"
+            style="font-family:var(--font-head);font-size:22px;font-weight:700;color:var(--accent-3)">0</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Articles</div>
+        </div>
+        <div style="background:var(--bg-secondary);border:1px solid var(--border);
+                    border-radius:var(--radius-sm);padding:12px;text-align:center">
+          <div id="manage-stat-messages"
+            style="font-family:var(--font-head);font-size:22px;font-weight:700;color:var(--accent-2)">0</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Messages</div>
+        </div>
+      </div>
+      <div style="margin-bottom:20px">
+        <div style="font-size:11px;font-weight:700;letter-spacing:1px;
+                    text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">Quick Actions</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <button type="button" class="btn-ghost"
+            onclick="App.closeAllModals();App.openMembersModal()"
+            style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px">
+            <i class="ti ti-user-plus"></i> Manage Members
+          </button>
+          <button type="button" class="btn-ghost"
+            onclick="App.closeAllModals();App.openInviteLinkModal()"
+            style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px">
+            <i class="ti ti-link"></i> Invite Link
+          </button>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content:space-between">
+        <button type="button" class="btn-ghost"
+          style="color:var(--accent-2);border-color:rgba(255,101,132,0.3)"
+          onclick="App.closeAllModals();App.openDeleteGroupModal()">
+          <i class="ti ti-trash"></i> Delete Group
+        </button>
+        <div style="display:flex;gap:8px">
+          <button type="button" class="btn-ghost modal-close">Cancel</button>
+          <button type="submit" class="btn-primary">Save Changes</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Delete Group Modal -->
+<div id="modal-delete-group" class="modal-overlay">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:var(--accent2)">
+        <i class="ti ti-alert-triangle"></i> Delete Group
+      </span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:13.5px;color:var(--text-secondary);line-height:1.7;margin-bottom:8px">
+      Are you sure you want to delete
+      <strong id="delete-group-name" style="color:var(--text-primary)">this group</strong>?
+      <br><span style="color:var(--accent2);font-size:12px">
+        ⚠ This will permanently delete all messages and articles in the group.
+      </span>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Type the group name to confirm</label>
+      <input id="delete-group-confirm-input" class="form-input" placeholder="Type group name here…">
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost modal-close">Cancel</button>
+      <button class="btn-primary" style="background:var(--accent2)" onclick="App.confirmDeleteGroup()">
+        Delete Group
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Invite Link Modal -->
+<div id="modal-invite-link" class="modal-overlay">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <span class="modal-title"><i class="ti ti-link"></i> Invite Link</span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="font-size:13px;color:var(--text-secondary);margin-bottom:14px">
+      Share this link with anyone to invite them to
+      <strong id="invite-link-group-name" style="color:var(--text-primary)">this group</strong>.
+    </div>
+    <div style="background:var(--bg-secondary);border:1px solid var(--border);
+                border-radius:var(--radius-sm);padding:12px 14px;
+                display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <i class="ti ti-link" style="color:var(--accent);flex-shrink:0"></i>
+      <span id="invite-link-url" style="font-size:12px;color:var(--text-secondary);flex:1;word-break:break-all">–</span>
+      <button onclick="App.copyInviteLink()"
+        style="background:var(--accent-soft);border:1px solid var(--border-accent);
+               color:var(--accent);border-radius:6px;padding:5px 12px;cursor:pointer;
+               font-size:12px;font-weight:600;white-space:nowrap">
+        <i class="ti ti-copy"></i> Copy
+      </button>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:16px">
+      <i class="ti ti-clock"></i> Link expires in 7 days · Anyone with this link can request to join
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="App.regenerateInviteLink()" class="btn-ghost"
+        style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px">
+        <i class="ti ti-refresh"></i> Generate New Link
+      </button>
+      <button onclick="App.shareInviteWhatsApp()" class="btn-ghost"
+        style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px">
+        <i class="ti ti-brand-whatsapp" style="color:#25d366"></i> Share on WhatsApp
+      </button>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost modal-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- File Attach Modal -->
+<div id="modal-file-attach" class="modal-overlay">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <span class="modal-title"><i class="ti ti-paperclip"></i> Attach File</span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="file-drop-zone"
+      style="border:2px dashed var(--border);border-radius:var(--radius);padding:32px;
+             text-align:center;cursor:pointer;transition:border-color 0.2s,background 0.2s"
+      onclick="document.getElementById('file-input').click()"
+      ondragover="event.preventDefault();this.style.borderColor='var(--accent)';this.style.background='var(--accent-soft)'"
+      ondragleave="this.style.borderColor='var(--border)';this.style.background=''"
+      ondrop="App.handleFileDrop(event)">
+      <i class="ti ti-cloud-upload"
+        style="font-size:36px;color:var(--text-muted);display:block;margin-bottom:10px"></i>
+      <div style="font-size:14px;font-weight:600;color:var(--text-secondary);margin-bottom:4px">
+        Drop files here or click to browse
+      </div>
+      <div style="font-size:12px;color:var(--text-muted)">Images, PDFs, Documents up to 10MB</div>
+    </div>
+    <input type="file" id="file-input" style="display:none"
+      accept="image/*,.pdf,.doc,.docx,.txt" onchange="App.handleFileSelect(this)">
+    <div id="file-preview" style="margin-top:12px;display:none">
+      <div style="background:var(--bg-secondary);border:1px solid var(--border);
+                  border-radius:var(--radius-sm);padding:10px 14px;
+                  display:flex;align-items:center;gap:10px">
+        <i class="ti ti-file" style="font-size:22px;color:var(--accent)"></i>
+        <div style="flex:1;min-width:0">
+          <div id="file-preview-name"
+            style="font-size:13px;font-weight:500;white-space:nowrap;
+                   overflow:hidden;text-overflow:ellipsis">filename.pdf</div>
+          <div id="file-preview-size" style="font-size:11px;color:var(--text-muted)">0 KB</div>
+        </div>
+        <button onclick="App.clearFileSelection()"
+          style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px">×</button>
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:12px">
+      <label class="form-label">Caption (optional)</label>
+      <input id="file-caption" class="form-input" placeholder="Add a message with this file…">
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost modal-close">Cancel</button>
+      <button id="send-file-btn" class="btn-primary" onclick="App.sendFile()">
+        <i class="ti ti-send"></i> Send File
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Admin Settings Modal -->
+<div id="modal-admin-settings" class="modal-overlay">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <span class="modal-title"><i class="ti ti-settings" style="color:var(--accent)"></i> Admin Settings</span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="modal-content" style="padding:16px 0">
+      <div style="padding:0 16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;
+                    padding:12px;background:var(--bg-hover);border-radius:var(--radius-sm);
+                    margin-bottom:12px">
+          <div>
+            <div style="font-size:14px;font-weight:500;color:var(--text-primary);margin-bottom:3px">
+              Allow Author Filter
+            </div>
+            <div style="font-size:12px;color:var(--text-muted)">
+              Let users filter articles by author name
+            </div>
+          </div>
+          <div style="width:50px">
+            <input type="checkbox" id="allow-author-filter-toggle" style="cursor:pointer;width:40px;height:24px"
+              onchange="App.toggleAuthorFilter(this.checked)">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost modal-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Group Context Menu -->
+<div id="group-ctx-menu" class="ctx-menu">
+  <div class="ctx-item" onclick="App.openManageGroupModal()">
+    <i class="ti ti-settings"></i> Group Settings
+  </div>
+  <div class="ctx-item" onclick="App.openMembersModal()">
+    <i class="ti ti-users"></i> Manage Members
+  </div>
+  <div class="ctx-item" onclick="App.openInviteLinkModal()">
+    <i class="ti ti-link"></i> Invite Link
+  </div>
+  <div class="ctx-item" onclick="App.shareOnFacebook(App.ctxTarget?.id)">
+    <i class="ti ti-brand-facebook"></i> Share on Facebook
+  </div>
+  <div class="divider" style="margin:4px 0"></div>
+  <div id="group-ctx-delete" class="ctx-item danger" onclick="App.openDeleteGroupModal()">
+    <i class="ti ti-trash"></i> Delete Group
+  </div>
+</div>
+
+<!-- ═══════════════ TOAST CONTAINER ═══════════════ -->
+<div id="toast-container" class="toast-container"></div>
+</button>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+
+<div id="sidebar-overlay" class="sidebar-overlay" onclick="document.querySelector('.sidebar').classList.remove('open'); this.classList.remove('open')"></div>
+</body>
+</html>

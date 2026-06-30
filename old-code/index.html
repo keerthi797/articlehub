@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ArticleHub – Editorial Dashboard</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- ═══════════════ TOPBAR ═══════════════ -->
+  <header class="topbar">
+    <div class="topbar-logo">
+      <span class="logo-icon">A</span>
+      <span class="brand-name">ArticleHub</span>
+    </div>
+
+    <div class="topbar-search">
+      <i class="ti ti-search"></i>
+      <input type="text" placeholder="Search articles, messages, users…">
+    </div>
+
+    <div class="topbar-actions">
+      <button class="topbar-btn" title="Notifications" onclick="App.navigateTo('notifications'); document.querySelectorAll('.sidebar-item[data-page]').forEach(i=>i.classList.remove('active')); document.querySelector('[data-page=notifications]').classList.add('active'); App.loadNotifications();">
+        <i class="ti ti-bell"></i>
+        <span id="notif-badge" style="display:none;position:absolute;top:5px;right:5px;background:var(--accent-2);color:#fff;font-size:9px;font-weight:700;border-radius:99px;min-width:16px;height:16px;align-items:center;justify-content:center;font-family:var(--font-head)">0</span>
+      </button>
+      <button class="topbar-btn" title="Settings">
+        <i class="ti ti-settings"></i>
+      </button>
+      <div class="avatar" title="My Profile">ME</div>
+      <button class="topbar-btn" id="logout-btn" title="Logout" style="margin-left:4px"><i class="ti ti-logout"></i></button>
+    </div>
+  </header>
+
+  <!-- ═══════════════ LEFT SIDEBAR ═══════════════ -->
+  <aside class="sidebar">
+    <span class="sidebar-section-label">Main</span>
+    <div class="sidebar-item active" data-page="feed">
+      <i class="ti ti-layout-dashboard"></i>
+      <span class="item-label">Feed</span>
+    </div>
+    <div class="sidebar-item" data-page="notifications">
+      <i class="ti ti-bell"></i>
+      <span class="item-label">Notifications</span>
+      <span class="sidebar-badge">5</span>
+    </div>
+    <div class="sidebar-item" data-page="analytics">
+      <i class="ti ti-chart-bar"></i>
+      <span class="item-label">Analytics</span>
+    </div>
+    <div class="sidebar-item" data-page="search">
+      <i class="ti ti-search"></i>
+      <span class="item-label">Search</span>
+    </div>
+
+    <span class="sidebar-section-label">Groups</span>
+
+    <div id="group-list">
+      <div class="group-item active" data-group="tech-news">
+        <div class="group-avatar" style="background:rgba(108,99,255,0.15);color:#6c63ff">TN</div>
+        <div class="group-info">
+          <div class="group-name">Tech & Innovation</div>
+          <div class="group-sub">12 members</div>
+        </div>
+        <span class="sidebar-badge">3</span>
+      </div>
+      <div class="group-item" data-group="world-news">
+        <div class="group-avatar" style="background:rgba(67,217,173,0.12);color:#43d9ad">WN</div>
+        <div class="group-info">
+          <div class="group-name">World News</div>
+          <div class="group-sub">8 members</div>
+        </div>
+      </div>
+      <div class="group-item" data-group="science">
+        <div class="group-avatar" style="background:rgba(255,101,132,0.12);color:#ff6584">SC</div>
+        <div class="group-info">
+          <div class="group-name">Science & Health</div>
+          <div class="group-sub">6 members</div>
+        </div>
+        <span class="sidebar-badge green">1</span>
+      </div>
+      <div class="group-item" data-group="editorial">
+        <div class="group-avatar" style="background:rgba(249,202,36,0.12);color:#f9ca24">ED</div>
+        <div class="group-info">
+          <div class="group-name">Editorial Team</div>
+          <div class="group-sub">5 members</div>
+        </div>
+      </div>
+      <div class="group-item" data-group="politics">
+        <div class="group-avatar" style="background:rgba(108,99,255,0.12);color:#a29bfe">PO</div>
+        <div class="group-info">
+          <div class="group-name">Politics & Policy</div>
+          <div class="group-sub">9 members</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:8px">
+      <div class="sidebar-item" id="create-group-btn">
+        <i class="ti ti-plus"></i>
+        <span class="item-label">Create Group</span>
+      </div>
+    </div>
+
+    <div class="divider" style="margin:12px 0"></div>
+
+    <span class="sidebar-section-label">Pinned Articles</span>
+    <div class="sidebar-item" style="flex-direction:column;align-items:flex-start;gap:4px;height:auto;padding:8px 12px">
+      <div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:12.5px;width:100%">
+        <i class="ti ti-pin" style="font-size:15px;color:var(--accent-2)"></i>
+        <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">OpenAI announces GPT-5</span>
+      </div>
+    </div>
+    <div class="sidebar-item" style="flex-direction:column;align-items:flex-start;gap:4px;height:auto;padding:8px 12px">
+      <div style="display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:12.5px;width:100%">
+        <i class="ti ti-pin" style="font-size:15px;color:var(--accent-2)"></i>
+        <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Climate summit outcomes 2025</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══════════════ CENTER – FEED ═══════════════ -->
+  <main class="center-panel">
+
+    <!-- ── PAGE: FEED ── -->
+    <div id="page-feed" class="page active">
+      <div class="channel-header">
+        <i class="ti ti-hash" style="color:var(--text-muted);font-size:18px"></i>
+        <span class="channel-title" id="channel-title">Tech & Innovation</span>
+        <div class="channel-actions">
+          <button class="topbar-btn" title="Search in channel"><i class="ti ti-search"></i></button>
+          <button class="topbar-btn" title="Pin article"><i class="ti ti-pin"></i></button>
+          <button class="topbar-btn" title="Members"><i class="ti ti-users"></i></button>
+        </div>
+      </div>
+
+      <div class="tab-bar">
+        <div class="tab active" data-tab="tab-articles">Articles</div>
+        <div class="tab" data-tab="tab-chat">Chat</div>
+      </div>
+
+      <!-- Share bar -->
+      <div class="share-article-bar">
+        <i class="ti ti-link" style="color:var(--accent);font-size:17px;flex-shrink:0"></i>
+        <input id="article-url-input" type="url" placeholder="Paste article URL to share with the group…">
+        <button id="share-article-btn" class="btn-primary" style="padding:6px 14px;font-size:12.5px;white-space:nowrap">Share</button>
+      </div>
+      <div id="og-preview" style="display:none;padding:8px 20px 4px;"></div>
+
+      <!-- Articles tab -->
+      <div id="tab-articles" class="tab-panel feed">
+
+        <!-- Pinned article -->
+        <div class="article-card pinned">
+          <div class="article-meta">
+            <div class="avatar" style="background:linear-gradient(135deg,#6c63ff,#ff6584)">JK</div>
+            <div>
+              <div class="article-author">James Kim <span class="tag tag-purple" style="margin-left:6px">Admin</span></div>
+            </div>
+            <span class="article-time">Yesterday, 2:45 PM</span>
+            <div class="pin-badge"><i class="ti ti-pin" style="font-size:11px"></i> Pinned</div>
+          </div>
+          <div class="article-preview">
+            <div class="article-img">
+              <div class="img-placeholder"><i class="ti ti-brand-openai"></i></div>
+            </div>
+            <div class="article-body">
+              <div class="article-source">TECHCRUNCH.COM</div>
+              <div class="article-title-text">OpenAI Unveils GPT-5 With Unprecedented Reasoning Capabilities and Multimodal Understanding</div>
+              <div class="article-desc">The latest model from OpenAI sets new benchmarks across reasoning, coding, and creative tasks, with researchers calling it the most capable AI system ever released to the public.</div>
+            </div>
+          </div>
+          <div class="article-actions">
+            <div class="reactions">
+              <div class="reaction-chip active"><span>👍</span><span class="rc">14</span></div>
+              <div class="reaction-chip"><span>🔥</span><span class="rc">8</span></div>
+              <div class="reaction-chip"><span>😮</span><span class="rc">5</span></div>
+            </div>
+            <button class="action-btn"><i class="ti ti-message-circle"></i> 12 replies</button>
+            <button class="action-btn" onclick="forwardArticle()"><i class="ti ti-share"></i> Forward</button>
+            <button class="action-btn more-actions" data-ctx><i class="ti ti-dots"></i></button>
+            <button class="action-btn" onclick="togglePin(this)" style="margin-left:auto" title="Pin/Unpin"><i class="ti ti-pin"></i></button>
+          </div>
+        </div>
+
+        <!-- Article 2 -->
+        <div class="article-card">
+          <div class="article-meta">
+            <div class="avatar" style="background:linear-gradient(135deg,#43d9ad,#0984e3)">SA</div>
+            <div>
+              <div class="article-author">Sarah Amir</div>
+            </div>
+            <span class="article-time">Today, 9:12 AM</span>
+          </div>
+          <div class="article-preview">
+            <div class="article-img">
+              <div class="img-placeholder"><i class="ti ti-cpu"></i></div>
+            </div>
+            <div class="article-body">
+              <div class="article-source">WIRED.COM</div>
+              <div class="article-title-text">Inside the Chip Wars: How TSMC's New 2nm Process Is Reshaping the Semiconductor Landscape</div>
+              <div class="article-desc">Taiwan Semiconductor's breakthrough 2nm fabrication process promises a 15% performance leap, igniting new geopolitical tensions over chip supply chains and strategic tech dominance.</div>
+            </div>
+          </div>
+          <div class="article-actions">
+            <div class="reactions">
+              <div class="reaction-chip"><span>👍</span><span class="rc">7</span></div>
+              <div class="reaction-chip"><span>❤️</span><span class="rc">3</span></div>
+            </div>
+            <button class="action-btn"><i class="ti ti-message-circle"></i> 4 replies</button>
+            <button class="action-btn" onclick="forwardArticle()"><i class="ti ti-share"></i> Forward</button>
+            <button class="action-btn more-actions" data-ctx><i class="ti ti-dots"></i></button>
+            <button class="action-btn" onclick="togglePin(this)" style="margin-left:auto"><i class="ti ti-pin"></i></button>
+          </div>
+        </div>
+
+        <!-- Article 3 with forwarded label -->
+        <div class="article-card">
+          <div class="article-meta">
+            <div class="avatar" style="background:linear-gradient(135deg,#f9ca24,#f0932b)">RL</div>
+            <div>
+              <div class="article-author">Rohan Lal <span class="tag tag-teal" style="margin-left:6px">Author</span></div>
+            </div>
+            <span class="article-time">Today, 11:30 AM</span>
+          </div>
+          <div style="padding: 0 16px">
+            <div class="forwarded-label"><i class="ti ti-corner-right-up" style="font-size:13px"></i> Forwarded from World News</div>
+          </div>
+          <div class="article-preview">
+            <div class="article-img">
+              <div class="img-placeholder"><i class="ti ti-world"></i></div>
+            </div>
+            <div class="article-body">
+              <div class="article-source">REUTERS.COM</div>
+              <div class="article-title-text">UN Climate Summit Reaches Landmark Agreement on Carbon Emissions Reduction by 2035</div>
+              <div class="article-desc">World leaders ratified a binding framework committing 147 nations to cut greenhouse gas emissions by 45% within a decade, marking the most ambitious climate accord since Paris 2015.</div>
+            </div>
+          </div>
+          <div class="article-actions">
+            <div class="reactions">
+              <div class="reaction-chip active"><span>👏</span><span class="rc">22</span></div>
+              <div class="reaction-chip"><span>❤️</span><span class="rc">11</span></div>
+              <div class="reaction-chip"><span>🔥</span><span class="rc">6</span></div>
+            </div>
+            <button class="action-btn"><i class="ti ti-message-circle"></i> 18 replies</button>
+            <button class="action-btn" onclick="forwardArticle()"><i class="ti ti-share"></i> Forward</button>
+            <button class="action-btn more-actions" data-ctx><i class="ti ti-dots"></i></button>
+            <button class="action-btn" onclick="togglePin(this)" style="margin-left:auto"><i class="ti ti-pin"></i></button>
+          </div>
+        </div>
+
+        <!-- Article 4 -->
+        <div class="article-card">
+          <div class="article-meta">
+            <div class="avatar" style="background:linear-gradient(135deg,#a29bfe,#6c63ff)">MP</div>
+            <div>
+              <div class="article-author">Maya Patel</div>
+            </div>
+            <span class="article-time">Today, 1:05 PM</span>
+          </div>
+          <div class="article-preview">
+            <div class="article-img">
+              <div class="img-placeholder"><i class="ti ti-rocket"></i></div>
+            </div>
+            <div class="article-body">
+              <div class="article-source">THE VERGE</div>
+              <div class="article-title-text">SpaceX Starship Successfully Completes First Crewed Mars Transit Simulation in Deep Space</div>
+              <div class="article-desc">Elon Musk's aerospace company passed a critical milestone as Starship completed a 120-day crewed simulation in cis-lunar space, paving the way for an actual Mars mission by 2028.</div>
+            </div>
+          </div>
+          <div class="article-actions">
+            <div class="reactions">
+              <div class="reaction-chip"><span>🔥</span><span class="rc">31</span></div>
+              <div class="reaction-chip"><span>😮</span><span class="rc">14</span></div>
+            </div>
+            <button class="action-btn"><i class="ti ti-message-circle"></i> 9 replies</button>
+            <button class="action-btn" onclick="forwardArticle()"><i class="ti ti-share"></i> Forward</button>
+            <button class="action-btn more-actions" data-ctx><i class="ti ti-dots"></i></button>
+            <button class="action-btn" onclick="togglePin(this)" style="margin-left:auto"><i class="ti ti-pin"></i></button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Chat tab -->
+      <div id="tab-chat" class="tab-panel feed" style="display:none" id="msg-feed-wrap">
+        <div class="date-divider">Today</div>
+
+        <div id="msg-feed">
+          <!-- Message 1 -->
+          <div class="msg-card">
+            <div class="avatar" style="align-self:flex-start;margin-top:2px;background:linear-gradient(135deg,#6c63ff,#ff6584)">JK</div>
+            <div class="msg-body">
+              <div class="msg-header">
+                <span class="msg-sender">James Kim</span>
+                <span class="msg-ts">9:05 AM</span>
+              </div>
+              <div class="msg-text">Good morning team! Don't miss the GPT-5 article I pinned above — huge implications for our AI coverage this quarter.</div>
+            </div>
+            <div class="msg-actions">
+              <button class="msg-action-btn" title="React" onclick="App.quickReact(this)"><i class="ti ti-mood-smile"></i></button>
+              <button class="msg-action-btn" title="Reply"><i class="ti ti-arrow-back-up"></i></button>
+              <button class="msg-action-btn" title="More"><i class="ti ti-dots"></i></button>
+            </div>
+          </div>
+
+          <!-- Message 2 with reply -->
+          <div class="msg-card">
+            <div class="avatar" style="align-self:flex-start;margin-top:2px;background:linear-gradient(135deg,#43d9ad,#0984e3)">SA</div>
+            <div class="msg-body">
+              <div class="msg-header">
+                <span class="msg-sender">Sarah Amir</span>
+                <span class="msg-ts">9:18 AM</span>
+              </div>
+              <div class="reply-preview">
+                <div class="reply-author">James Kim</div>
+                <div class="reply-text">Good morning team! Don't miss the GPT-5 article…</div>
+              </div>
+              <div class="msg-text">Already on it! I'm drafting a comparison piece between GPT-5 and Gemini Ultra. Should have a draft by EOD.</div>
+              <div class="seen-status"><i class="ti ti-checks"></i> Seen by 6</div>
+            </div>
+            <div class="msg-actions">
+              <button class="msg-action-btn" onclick="App.quickReact(this)"><i class="ti ti-mood-smile"></i></button>
+              <button class="msg-action-btn"><i class="ti ti-arrow-back-up"></i></button>
+              <button class="msg-action-btn"><i class="ti ti-dots"></i></button>
+            </div>
+          </div>
+
+          <!-- Message 3 -->
+          <div class="msg-card">
+            <div class="avatar" style="align-self:flex-start;margin-top:2px;background:linear-gradient(135deg,#f9ca24,#f0932b)">RL</div>
+            <div class="msg-body">
+              <div class="msg-header">
+                <span class="msg-sender">Rohan Lal</span>
+                <span class="msg-ts">10:42 AM</span>
+              </div>
+              <div class="msg-text">FYI I forwarded the climate summit article here from World News group — very relevant to our coverage calendar next week.</div>
+            </div>
+            <div class="msg-actions">
+              <button class="msg-action-btn" onclick="App.quickReact(this)"><i class="ti ti-mood-smile"></i></button>
+              <button class="msg-action-btn"><i class="ti ti-arrow-back-up"></i></button>
+              <button class="msg-action-btn"><i class="ti ti-dots"></i></button>
+            </div>
+          </div>
+
+          <!-- System message -->
+          <div style="text-align:center;font-size:11.5px;color:var(--text-muted);padding:4px 0;font-style:italic">
+            Maya Patel edited a message · 11:55 AM
+          </div>
+
+          <!-- Message 4 -->
+          <div class="msg-card">
+            <div class="avatar" style="align-self:flex-start;margin-top:2px;background:linear-gradient(135deg,#a29bfe,#6c63ff)">MP</div>
+            <div class="msg-body">
+              <div class="msg-header">
+                <span class="msg-sender">Maya Patel</span>
+                <span class="msg-ts">12:01 PM</span>
+              </div>
+              <div class="msg-text">SpaceX article is up! <a href="#">🔗 Read it here</a> — think this pairs well with our upcoming space tech series.</div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <div class="reaction-chip active"><span>🔥</span><span class="rc">5</span></div>
+                <div class="reaction-chip"><span>👏</span><span class="rc">3</span></div>
+              </div>
+            </div>
+            <div class="msg-actions">
+              <button class="msg-action-btn" onclick="App.quickReact(this)"><i class="ti ti-mood-smile"></i></button>
+              <button class="msg-action-btn"><i class="ti ti-arrow-back-up"></i></button>
+              <button class="msg-action-btn"><i class="ti ti-dots"></i></button>
+            </div>
+          </div>
+
+        </div><!-- end #msg-feed -->
+
+        <div id="typing-indicator" class="typing-indicator" style="display:none;padding:0 0 4px 0">
+          <div class="avatar" style="width:20px;height:20px;font-size:8px;flex-shrink:0;background:linear-gradient(135deg,#43d9ad,#0984e3)">SA</div>
+          <div class="typing-dots">
+            <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+          </div>
+          <span style="font-size:11px">Sarah Amir is typing…</span>
+        </div>
+
+      </div>
+
+      <!-- Message input -->
+      <div class="message-input-bar">
+        <div class="input-wrapper">
+          <textarea id="msg-input" rows="1" placeholder="Message #tech-innovation, or paste a URL to share an article…"></textarea>
+          <div class="input-actions">
+            <button class="input-btn" id="emoji-btn" title="Emoji"><i class="ti ti-mood-smile"></i></button>
+            <button class="input-btn" title="Attach file"><i class="ti ti-paperclip"></i></button>
+            <button class="send-btn" id="send-btn" title="Send"><i class="ti ti-send"></i></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PAGE: NOTIFICATIONS ── -->
+    <div id="page-notifications" class="page">
+      <div class="channel-header">
+        <i class="ti ti-bell" style="color:var(--text-muted);font-size:18px"></i>
+        <span class="channel-title">Notifications</span>
+        <button class="action-btn channel-sub" style="margin-left:auto" onclick="NotificationsAPI.markAllRead().then(()=>{App.loadNotifications();App.loadNotificationBadge();})">Mark all read</button>
+      </div>
+      <div id="notifications-feed" class="feed" style="gap:4px">
+
+        <div class="notif-item unread">
+          <div class="notif-icon" style="background:var(--accent-soft);color:var(--accent)"><i class="ti ti-arrow-back-up"></i></div>
+          <div class="notif-text">
+            <strong>Sarah Amir</strong> replied to your message in <strong>#tech-innovation</strong>
+            <div class="notif-time">2 minutes ago</div>
+          </div>
+        </div>
+        <div class="notif-item unread">
+          <div class="notif-icon" style="background:rgba(255,101,132,0.12);color:var(--accent-2)"><i class="ti ti-pin"></i></div>
+          <div class="notif-text">
+            <strong>James Kim</strong> pinned an article in <strong>#tech-innovation</strong>
+            <div class="notif-time">1 hour ago</div>
+          </div>
+        </div>
+        <div class="notif-item unread">
+          <div class="notif-icon" style="background:rgba(67,217,173,0.12);color:var(--accent-3)"><i class="ti ti-users"></i></div>
+          <div class="notif-text">
+            You were added to <strong>World News</strong> group by <strong>James Kim</strong>
+            <div class="notif-time">3 hours ago</div>
+          </div>
+        </div>
+        <div class="notif-item unread">
+          <div class="notif-icon" style="background:var(--accent-soft);color:var(--accent)"><i class="ti ti-mood-smile"></i></div>
+          <div class="notif-text">
+            <strong>Rohan Lal</strong> reacted 🔥 to your article share
+            <div class="notif-time">4 hours ago</div>
+          </div>
+        </div>
+        <div class="notif-item unread">
+          <div class="notif-icon" style="background:rgba(249,202,36,0.1);color:#f9ca24"><i class="ti ti-corner-right-up"></i></div>
+          <div class="notif-text">
+            <strong>Maya Patel</strong> forwarded your article to <strong>#science</strong>
+            <div class="notif-time">Yesterday</div>
+          </div>
+        </div>
+        <div class="notif-item">
+          <div class="notif-icon" style="background:var(--bg-hover);color:var(--text-muted)"><i class="ti ti-trash"></i></div>
+          <div class="notif-text">
+            <strong>James Kim</strong> deleted a message in <strong>#editorial</strong>
+            <div class="notif-time">Yesterday</div>
+          </div>
+        </div>
+        <div class="notif-item">
+          <div class="notif-icon" style="background:var(--bg-hover);color:var(--text-muted)"><i class="ti ti-at"></i></div>
+          <div class="notif-text">
+            <strong>Sarah Amir</strong> mentioned you in <strong>#science</strong>: "…@you should cover this…"
+            <div class="notif-time">2 days ago</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── PAGE: ANALYTICS ── -->
+    <div id="page-analytics" class="page">
+      <div class="channel-header">
+        <i class="ti ti-chart-bar" style="color:var(--text-muted);font-size:18px"></i>
+        <span class="channel-title">Analytics</span>
+        <span class="channel-sub" style="margin-left:auto;color:var(--text-muted);font-size:12px">Last 30 days</span>
+      </div>
+      <div class="feed">
+
+        <div class="analytics-grid">
+          <div class="analytic-card">
+            <div class="val" id="stat-views" style="color:var(--accent)">–</div>
+            <div class="lbl">Total Article Views</div>
+          </div>
+          <div class="analytic-card">
+            <div class="val" id="stat-articles" style="color:var(--accent-3)">–</div>
+            <div class="lbl">Articles This Month</div>
+          </div>
+          <div class="analytic-card">
+            <div class="val" id="stat-messages" style="color:var(--accent-2)">–</div>
+            <div class="lbl">Messages This Month</div>
+          </div>
+          <div class="analytic-card">
+            <div class="val" id="stat-users" style="color:#f9ca24">–</div>
+            <div class="lbl">Active Members</div>
+          </div>
+        </div>
+
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 20px">
+          <div style="font-family:var(--font-head);font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:16px;letter-spacing:0.5px">MOST ACTIVE GROUPS</div>
+          <div id="groups-chart" class="bar-chart">
+            <div class="bar-row">
+              <span class="bar-label">Tech & Innovation</span>
+              <div class="bar-track"><div class="bar-fill" data-width="88%" style="width:0;background:var(--accent)"></div></div>
+              <span class="bar-val">88%</span>
+            </div>
+            <div class="bar-row">
+              <span class="bar-label">World News</span>
+              <div class="bar-track"><div class="bar-fill" data-width="72%" style="width:0;background:var(--accent-3)"></div></div>
+              <span class="bar-val">72%</span>
+            </div>
+            <div class="bar-row">
+              <span class="bar-label">Science & Health</span>
+              <div class="bar-track"><div class="bar-fill" data-width="61%" style="width:0;background:var(--accent-2)"></div></div>
+              <span class="bar-val">61%</span>
+            </div>
+            <div class="bar-row">
+              <span class="bar-label">Editorial Team</span>
+              <div class="bar-track"><div class="bar-fill" data-width="45%" style="width:0;background:#f9ca24"></div></div>
+              <span class="bar-val">45%</span>
+            </div>
+            <div class="bar-row">
+              <span class="bar-label">Politics</span>
+              <div class="bar-track"><div class="bar-fill" data-width="38%" style="width:0;background:var(--text-muted)"></div></div>
+              <span class="bar-val">38%</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px 20px">
+          <div style="font-family:var(--font-head);font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:14px;letter-spacing:0.5px">TOP SHARED ARTICLES</div>
+          <div id="top-articles-list" style="display:flex;flex-direction:column;gap:0">
+            <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+              <span style="font-family:var(--font-head);font-size:16px;font-weight:700;color:var(--accent);min-width:24px">1</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">OpenAI Unveils GPT-5 With Unprecedented Reasoning</div>
+                <div style="font-size:11px;color:var(--text-muted)">techcrunch.com · 248 views</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+              <span style="font-family:var(--font-head);font-size:16px;font-weight:700;color:var(--accent);min-width:24px">2</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">UN Climate Summit Reaches Landmark Agreement</div>
+                <div style="font-size:11px;color:var(--text-muted)">reuters.com · 194 views</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+              <span style="font-family:var(--font-head);font-size:16px;font-weight:700;color:var(--accent);min-width:24px">3</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">SpaceX Starship Completes First Crewed Mars Simulation</div>
+                <div style="font-size:11px;color:var(--text-muted)">theverge.com · 167 views</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;padding:10px 0">
+              <span style="font-family:var(--font-head);font-size:16px;font-weight:700;color:var(--accent);min-width:24px">4</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Inside the Chip Wars: TSMC's 2nm Process</div>
+                <div style="font-size:11px;color:var(--text-muted)">wired.com · 122 views</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── PAGE: SEARCH ── -->
+    <div id="page-search" class="page">
+      <div class="channel-header">
+        <i class="ti ti-search" style="color:var(--text-muted);font-size:18px"></i>
+        <span class="channel-title">Search</span>
+      </div>
+      <div class="feed">
+        <div style="display:flex;gap:10px;margin-bottom:8px">
+          <input class="form-input" placeholder="Search articles, messages, members…" style="flex:1" oninput="this.closest('.page').querySelector('.search-results').style.opacity='1'">
+          <select class="form-input" style="width:140px">
+            <option>All types</option>
+            <option>Articles</option>
+            <option>Messages</option>
+            <option>Members</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+          <button class="tag tag-purple" style="cursor:pointer;padding:5px 12px">All Groups</button>
+          <button class="tag" style="cursor:pointer;padding:5px 12px;background:var(--bg-hover);color:var(--text-secondary)">Tech</button>
+          <button class="tag" style="cursor:pointer;padding:5px 12px;background:var(--bg-hover);color:var(--text-secondary)">World</button>
+          <button class="tag" style="cursor:pointer;padding:5px 12px;background:var(--bg-hover);color:var(--text-secondary)">Science</button>
+          <button class="tag" style="cursor:pointer;padding:5px 12px;background:var(--bg-hover);color:var(--text-secondary)">Pinned only</button>
+        </div>
+
+        <div class="search-results" style="opacity:0.4;transition:opacity 0.2s">
+          <div style="font-family:var(--font-head);font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">Recent Results</div>
+
+          <div class="article-card" style="margin-bottom:12px">
+            <div class="article-meta">
+              <div class="avatar" style="background:linear-gradient(135deg,#6c63ff,#ff6584)">JK</div>
+              <div><div class="article-author">James Kim</div></div>
+              <span class="tag tag-purple" style="margin-left:auto">Tech & Innovation</span>
+            </div>
+            <div class="article-preview">
+              <div class="article-img"><div class="img-placeholder"><i class="ti ti-brand-openai"></i></div></div>
+              <div class="article-body">
+                <div class="article-source">TECHCRUNCH.COM</div>
+                <div class="article-title-text">OpenAI Unveils GPT-5 With Unprecedented Reasoning Capabilities</div>
+                <div class="article-desc">The latest model from OpenAI sets new benchmarks…</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="msg-card" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:12px">
+            <div class="avatar" style="align-self:flex-start;background:linear-gradient(135deg,#43d9ad,#0984e3)">SA</div>
+            <div class="msg-body">
+              <div class="msg-header">
+                <span class="msg-sender">Sarah Amir</span>
+                <span class="msg-ts">Today 9:18 AM</span>
+                <span class="tag tag-teal" style="margin-left:auto">Tech & Innovation</span>
+              </div>
+              <div class="msg-text">Already on it! I'm drafting a comparison piece between GPT-5 and Gemini Ultra.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ═══════════════ RIGHT PANEL ═══════════════ -->
+  <aside class="right-panel">
+
+    <div>
+      <div class="panel-section-title">Online Now</div>
+      <div id="members-list">
+      <div class="member-row">
+        <div class="avatar" style="background:linear-gradient(135deg,#6c63ff,#ff6584);width:28px;height:28px;font-size:10px">JK</div>
+        <div style="flex:1">
+          <div class="member-name">James Kim</div>
+          <div class="member-role">Admin</div>
+        </div>
+        <div class="online-dot"></div>
+      </div>
+      <div class="member-row">
+        <div class="avatar" style="background:linear-gradient(135deg,#43d9ad,#0984e3);width:28px;height:28px;font-size:10px">SA</div>
+        <div style="flex:1">
+          <div class="member-name">Sarah Amir</div>
+          <div class="member-role">Author</div>
+        </div>
+        <div class="online-dot"></div>
+      </div>
+      <div class="member-row">
+        <div class="avatar" style="background:linear-gradient(135deg,#a29bfe,#6c63ff);width:28px;height:28px;font-size:10px">MP</div>
+        <div style="flex:1">
+          <div class="member-name">Maya Patel</div>
+          <div class="member-role">Author</div>
+        </div>
+        <div class="online-dot"></div>
+      </div>
+      <div class="member-row">
+        <div class="avatar" style="background:linear-gradient(135deg,#f9ca24,#f0932b);width:28px;height:28px;font-size:10px">RL</div>
+        <div style="flex:1">
+          <div class="member-name">Rohan Lal</div>
+          <div class="member-role">Author</div>
+        </div>
+        <div class="offline-dot"></div>
+      </div>
+      <div class="member-row">
+        <div class="avatar" style="background:linear-gradient(135deg,#6ab04c,#43d9ad);width:28px;height:28px;font-size:10px">PW</div>
+        <div style="flex:1">
+          <div class="member-name">Priya Wilson</div>
+          <div class="member-role">Author</div>
+        </div>
+        <div class="offline-dot"></div>
+      </div>
+      </div><!-- end members-list -->
+      <button class="action-btn" style="font-size:12px;color:var(--accent);padding:4px 0;margin-top:4px" data-modal="modal-members">
+        <i class="ti ti-users"></i> View all members
+      </button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div>
+      <div class="panel-section-title">Quick Stats</div>
+      <div class="stat-mini">
+        <div class="stat-mini-value">47</div>
+        <div class="stat-mini-label">Articles shared this week</div>
+        <div class="stat-mini-delta">↑ 12% vs last week</div>
+      </div>
+      <div class="stat-mini">
+        <div class="stat-mini-value" style="color:var(--accent-3)">1.2k</div>
+        <div class="stat-mini-label">Total views this month</div>
+        <div class="stat-mini-delta">↑ 18%</div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div>
+      <div class="panel-section-title">Pinned Articles</div>
+      <div class="pinned-item">
+        <div class="pinned-thumb"><div style="width:100%;height:100%;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;font-size:18px"><i class="ti ti-brand-openai" style="color:var(--accent)"></i></div></div>
+        <div>
+          <div class="pinned-title">OpenAI Unveils GPT-5 With Unprecedented Reasoning Capabilities</div>
+          <div class="pinned-by">Pinned by James Kim</div>
+        </div>
+      </div>
+      <div class="pinned-item">
+        <div class="pinned-thumb"><div style="width:100%;height:100%;background:rgba(67,217,173,0.1);display:flex;align-items:center;justify-content:center;font-size:18px"><i class="ti ti-world" style="color:var(--accent-3)"></i></div></div>
+        <div>
+          <div class="pinned-title">UN Climate Summit Reaches Landmark Agreement on Carbon Reduction</div>
+          <div class="pinned-by">Pinned by James Kim</div>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+</div><!-- end .app-shell -->
+
+<!-- ═══════════════ CONTEXT MENU ═══════════════ -->
+<div id="ctx-menu" class="ctx-menu">
+  <div class="ctx-item" onclick="App.ctxAction('pin')"><i class="ti ti-pin"></i> Pin article</div>
+  <div class="ctx-item" onclick="forwardArticle()"><i class="ti ti-share"></i> Forward to group</div>
+  <div class="ctx-item" onclick="App.ctxAction('copy')"><i class="ti ti-copy"></i> Copy link</div>
+  <div class="ctx-item" onclick="App.ctxAction('edit')"><i class="ti ti-edit"></i> Edit</div>
+  <div class="divider" style="margin:4px 0"></div>
+  <div class="ctx-item danger" onclick="App.ctxAction('delete')"><i class="ti ti-trash"></i> Delete</div>
+</div>
+
+<!-- ═══════════════ EMOJI PICKER ═══════════════ -->
+<div id="emoji-picker" class="emoji-row" style="display:none;position:fixed">
+  <div class="emoji-btn" onclick="App.pickEmoji('👍')">👍</div>
+  <div class="emoji-btn" onclick="App.pickEmoji('❤️')">❤️</div>
+  <div class="emoji-btn" onclick="App.pickEmoji('😂')">😂</div>
+  <div class="emoji-btn" onclick="App.pickEmoji('😮')">😮</div>
+  <div class="emoji-btn" onclick="App.pickEmoji('🔥')">🔥</div>
+  <div class="emoji-btn" onclick="App.pickEmoji('👏')">👏</div>
+</div>
+
+<!-- ═══════════════ MODALS ═══════════════ -->
+
+<!-- Create Group Modal -->
+<div id="modal-create-group" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Create New Group</span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <form id="create-group-form">
+      <div class="form-group">
+        <label class="form-label">Group Name</label>
+        <input id="group-name-input" class="form-input" type="text" placeholder="e.g. Breaking News Team" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <textarea id="group-desc-input" class="form-input" rows="3" placeholder="What is this group for?" style="resize:none"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Add Members</label>
+        <div id="member-select-list" style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;background:var(--bg-secondary)">
+          <div style="color:var(--text-muted);font-size:12px">Loading members…</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-ghost modal-close">Cancel</button>
+        <button type="submit" class="btn-primary">Create Group</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Forward Article Modal -->
+<div id="modal-forward" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Forward to Groups</span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <form id="forward-form">
+      <div class="form-group">
+        <label class="form-label">Select Groups</label>
+        <div id="forward-group-list" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">
+          <div style="color:var(--text-muted);font-size:12px">Loading groups…</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-ghost modal-close">Cancel</button>
+        <button type="submit" class="btn-primary">Forward</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Members Modal -->
+<div id="modal-members" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Group Members – Tech & Innovation</span>
+      <button class="modal-close"><i class="ti ti-x"></i></button>
+    </div>
+    <div style="margin-bottom:12px">
+      <input class="form-input" placeholder="Search members…">
+    </div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div class="avatar" style="background:linear-gradient(135deg,#6c63ff,#ff6584)">JK</div>
+        <div style="flex:1"><div style="font-size:13px;font-weight:500">James Kim</div><div style="font-size:11px;color:var(--text-muted)">james@newsroom.com</div></div>
+        <span class="tag tag-purple">Admin</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div class="avatar" style="background:linear-gradient(135deg,#43d9ad,#0984e3)">SA</div>
+        <div style="flex:1"><div style="font-size:13px;font-weight:500">Sarah Amir</div><div style="font-size:11px;color:var(--text-muted)">sarah@newsroom.com</div></div>
+        <span class="tag tag-teal">Author</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div class="avatar" style="background:linear-gradient(135deg,#a29bfe,#6c63ff)">MP</div>
+        <div style="flex:1"><div style="font-size:13px;font-weight:500">Maya Patel</div><div style="font-size:11px;color:var(--text-muted)">maya@newsroom.com</div></div>
+        <span class="tag tag-teal">Author</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0">
+        <div class="avatar" style="background:linear-gradient(135deg,#f9ca24,#f0932b)">RL</div>
+        <div style="flex:1"><div style="font-size:13px;font-weight:500">Rohan Lal</div><div style="font-size:11px;color:var(--text-muted)">rohan@newsroom.com</div></div>
+        <span class="tag tag-teal">Author</span>
+      </div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <button class="btn-ghost" style="display:flex;align-items:center;gap:6px"><i class="ti ti-user-plus"></i> Add Member</button>
+      <button class="btn-ghost modal-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ TOAST CONTAINER ═══════════════ -->
+<div id="toast-container" class="toast-container"></div>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

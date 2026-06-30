@@ -1,0 +1,13 @@
+
+The app currently only shows a "reset link sent" message.
+It does not generate a token, save it, or send email.
+Offline reset flow
+User requests password reset.
+App asks for email.
+Server generates a secure one-time reset code or token.
+
+Server stores that token in the database with:
+user ID
+expiration time
+used / unused status
+The system shows the code locally to an admin or on a secure page.

@@ -1,0 +1,2455 @@
+// js/app.js – Complete ArticleHub
+
+const App = {
+    currentGroupId:   null,
+    currentGroupName: null,
+    replyingTo:       null,
+    editingMsgId:     null,
+    ctxTarget:        null,
+    _forwardTarget:   null,
+    _inviteSelectedUser: null,
+    _currentMembers:  [],
+    _lastMessageId:   0,
+    allowAuthorFilter: true, // Default to true, will be loaded from settings
+
+    // ─────────────────────────────────────────
+    // INIT
+    // ─────────────────────────────────────────
+    async init() {
+        
+        if (!Auth.isLoggedIn()) { window.location.href = 'auth.html'; return; }
+        this.renderCurrentUser();
+        await this.loadSettings();
+        await this.loadGroups();
+        this.bindNav();
+        this.bindMessageInput();
+        this.bindShareBar();
+        this.bindModals();
+        this.bindContextMenus();
+        this.bindTabBar();
+        this.loadNotificationBadge();
+        this.bindThemeToggle();
+        this._lastMessageCount = 0;
+        setInterval(() => this.loadNotificationBadge(), 15000);
+        setInterval(() => this.pollMessages(), 8000);
+        this.initOnlineStatus();
+        // Handle notification deep-link AFTER everything is loaded
+        await this._handleUrlParams();
+    },
+
+    // ─────────────────────────────────────────
+    // LOAD SETTINGS
+    // ─────────────────────────────────────────
+    async loadSettings() {
+        const res = await SettingsAPI.get('allow_author_filter');
+        if (res?.success) {
+            this.allowAuthorFilter = res.data.value === 1 || res.data.value === true || res.data.value === 'true';
+        }
+    },
+
+    // ─────────────────────────────────────────
+    // URL PARAMS (deep-link from notification)
+    // ─────────────────────────────────────────
+    async _handleUrlParams() {
+        const params    = new URLSearchParams(window.location.search);
+        const groupId   = parseInt(params.get('group_id'));
+        const messageId = parseInt(params.get('message_id'));
+        if (!groupId) return;
+
+        // const groupItem = document.querySelector(`.group-item[data-group-id="${groupId}"]`);
+        // if (!groupItem) {
+        //     this.showToast('Group not found or you are not a member', 'ti-alert-circle');
+        //     return;
+        // }
+
+        // const groupName = groupItem.querySelector('.group-name')?.textContent || '';
+        const groups = await GroupsAPI.list();
+
+        const group = groups?.data?.find(
+            g => parseInt(g.id) === parseInt(groupId)
+        );
+
+        if (!group) {
+            this.showToast('Group not found or you are not a member', 'ti-alert-circle');
+            return;
+        }
+
+        const groupName = group.name || 'Group';
+        await this.selectGroup(groupId, groupName);
+        document.querySelector('.tab[data-tab="tab-chat"]')?.click();
+
+        if (messageId) {
+            await this.loadMessages();
+            setTimeout(() => {
+                const msgEl = document.querySelector(`.msg-card[data-msg-id="${messageId}"]`);
+                if (msgEl) {
+                    msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    msgEl.style.outline      = '2px solid var(--accent)';
+                    msgEl.style.borderRadius = '8px';
+                    setTimeout(() => msgEl.style.outline = '', 2500);
+                }
+            }, 500);
+        }
+
+        // Clean URL so refresh doesn't re-trigger
+        window.history.replaceState({}, '', window.location.pathname);
+    },
+
+    renderCurrentUser() {
+        const user = Auth.getUser();
+        if (!user) return;
+        const initials = user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+        document.querySelectorAll('.avatar[title="My Profile"]').forEach(el => {
+            el.textContent = initials;
+        });
+        // Show admin settings button only for admins
+        const adminBtn = document.getElementById('admin-settings-btn');
+        if (adminBtn) adminBtn.style.display = Auth.isAdmin() ? '' : 'none';
+    },
+
+    // ─────────────────────────────────────────
+    // GROUPS
+    // ─────────────────────────────────────────
+    async loadGroups(autoSelect = true) {
+        const res = await GroupsAPI.list();
+        if (!res?.success) {
+            this.showToast('Could not load groups – check DB', 'ti-alert-circle');
+            return;
+        }
+        const list = document.getElementById('group-list');
+        if (!list) return;
+        list.innerHTML = '';
+        const colors = [
+            { bg:'rgba(108,99,255,0.15)', fg:'#6c63ff' },
+            { bg:'rgba(67,217,173,0.12)',  fg:'#43d9ad' },
+            { bg:'rgba(255,101,132,0.12)', fg:'#ff6584' },
+            { bg:'rgba(249,202,36,0.12)',  fg:'#f9ca24' },
+            { bg:'rgba(162,155,254,0.12)', fg:'#a29bfe' },
+        ];
+        if (res.data.length === 0) {
+            list.innerHTML = `<div style="padding:10px 12px;font-size:12px;color:var(--text-muted)">No groups yet. Create one!</div>`;
+            return;
+        }
+        res.data.forEach((group, i) => {
+            const c = colors[i % colors.length];
+            const initials = group.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+            const el = document.createElement('div');
+            el.className = 'group-item';
+            el.dataset.groupId = group.id;
+            el.innerHTML = `
+                <div class="group-avatar" style="background:${c.bg};color:${c.fg}">${initials}</div>
+                <div class="group-info">
+                    <div class="group-name">${this.esc(group.name)}</div>
+                    <div class="group-sub">${group.member_count} member${group.member_count!=1?'s':''}</div>
+                </div>`;
+            el.addEventListener('click', () => this.selectGroup(group.id, group.name));
+            el.addEventListener('contextmenu', e => this.showGroupCtxMenu(e, group.id, group.name));
+            list.appendChild(el);
+        });
+
+        let selectedGroupId = null;
+        const currentGroupExists = this.currentGroupId && res.data.some(g => g.id == this.currentGroupId);
+        if (currentGroupExists) {
+            selectedGroupId = this.currentGroupId;
+        } else if (autoSelect && res.data.length > 0) {
+            selectedGroupId = res.data[0].id;
+        }
+
+        if (selectedGroupId) {
+            if (selectedGroupId === this.currentGroupId) {
+                document.querySelector(`.group-item[data-group-id="${selectedGroupId}"]`)?.classList.add('active');
+            } else if (autoSelect) {
+                const selectedGroup = res.data.find(g => g.id == selectedGroupId);
+                await this.selectGroup(selectedGroupId, selectedGroup?.name || 'Group');
+            } else {
+                document.querySelector(`.group-item[data-group-id="${selectedGroupId}"]`)?.classList.add('active');
+            }
+        }
+
+        const settingsBtn = document.getElementById('group-settings-btn');
+        if (settingsBtn) settingsBtn.style.display = Auth.isAdmin() ? '' : 'none';
+    },
+
+    async selectGroup(groupId, groupName) {
+        this.currentGroupId   = groupId;
+        this.currentGroupName = groupName;
+
+        // Close channel search if open when switching groups
+        if (this._channelSearchOpen) this.toggleChannelSearch();
+
+        document.querySelectorAll('.group-item').forEach(i => i.classList.remove('active'));
+        document.querySelector(`.group-item[data-group-id="${groupId}"]`)?.classList.add('active');
+        document.getElementById('channel-title').textContent = groupName;
+        const input = document.getElementById('msg-input');
+        if (input) input.placeholder = `Message #${groupName.toLowerCase().replace(/ /g,'-')}…`;
+        this.navigateTo('feed');
+        document.querySelectorAll('.sidebar-item[data-page]').forEach(i => i.classList.remove('active'));
+        document.querySelector('[data-page="feed"]')?.classList.add('active');
+        document.querySelector('.tab[data-tab="tab-articles"]')?.click();
+        await Promise.all([
+            this.loadArticles(),
+            this.loadMessages(),
+            this.loadRightPanelMembers(),
+        ]);
+
+        //new code
+         // ✅ ADD THESE TWO LINES
+        this._channelSearchCache = { articles: [], messages: [], members: [] };
+        this.loadChannelSearchCache(); // loads in background, no await
+
+
+        //code end
+    },
+
+    // ─────────────────────────────────────────
+    // NAVIGATION
+    // ─────────────────────────────────────────
+    bindNav() {
+        
+        document.querySelectorAll('.sidebar-item[data-page]').forEach(item => {
+            item.addEventListener('click', () => {
+                const page = item.dataset.page;
+                this.navigateTo(page);
+                document.querySelectorAll('.sidebar-item[data-page]').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                if (page === 'notifications') {
+                    console.log("Loading notifications...");
+                    this.loadNotifications();
+                }
+                if (page === 'analytics')     this.loadAnalytics();
+                if (page === 'search')        this.initSearch();
+            });
+        });
+        document.getElementById('logout-btn')?.addEventListener('click', () => {
+            if (confirm('Are you sure you want to logout?')) AuthAPI.logout();
+        });
+    },
+
+    navigateTo(page) {
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        document.getElementById('page-' + page)?.classList.add('active');
+    },
+
+    // ─────────────────────────────────────────
+    // ARTICLES
+    // ─────────────────────────────────────────
+    /*async loadArticles() {
+        if (!this.currentGroupId) return;
+        const res = await ArticlesAPI.list(this.currentGroupId);
+        if (!res?.success) {
+            this.showToast('Could not load articles', 'ti-alert-circle');
+            return;
+        }
+
+        const feed = document.getElementById('tab-articles');
+        if (!feed) return;
+        feed.innerHTML = '';
+
+        if (res.data.length === 0) {
+            feed.innerHTML = `
+                <div class="empty-state">
+                    <i class="ti ti-newspaper"></i>
+                    <p>No articles yet.<br>Paste a URL above to share the first one!</p>
+                </div>`;
+            return;
+        }
+
+        const pinned = res.data
+            .filter(a => a.is_pinned == 1)
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        const unpinned = res.data
+            .filter(a => a.is_pinned != 1)
+            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+        [...pinned, ...unpinned].forEach(article =>
+            feed.appendChild(this.buildArticleCard(article))
+        );
+        //new code to load the articles
+        requestAnimationFrame(() => { feed.scrollTop = feed.scrollHeight; });
+    },
+    */
+
+
+
+
+    async loadArticles() {
+        if (!this.currentGroupId) return;
+        const res = await ArticlesAPI.list(this.currentGroupId);
+        if (!res?.success) {
+            this.showToast('Could not load articles', 'ti-alert-circle');
+            return;
+        }
+
+        const pinnedSection = document.getElementById('pinned-articles-section');
+        const unpinnedFeed = document.getElementById('unpinned-articles-feed');
+        if (!pinnedSection || !unpinnedFeed) return;
+
+        pinnedSection.innerHTML = '';
+        unpinnedFeed.innerHTML = '';
+
+        if (res.data.length === 0) {
+            unpinnedFeed.innerHTML = `
+                <div class="empty-state">
+                    <i class="ti ti-newspaper"></i>
+                    <p>No articles yet.<br>Paste a URL above to share the first one!</p>
+                </div>`;
+            return;
+        }
+
+        const pinned = res.data
+            .filter(a => a.is_pinned == 1)
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        const unpinned = res.data
+            .filter(a => a.is_pinned != 1)
+            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+        // Render pinned into sticky section
+       /* if (pinned.length > 0) {
+            pinned.forEach(article =>
+                pinnedSection.appendChild(this.buildArticleCard(article))
+            );
+        }*/
+
+
+
+            if (pinned.length > 0) {
+                pinned.forEach(article => {
+                    const pin = document.createElement('div');
+                    pin.style.cssText = `display:flex;align-items:center;gap:10px;
+                        padding:8px 14px;border-bottom:1px solid var(--border);
+                        background:rgba(108,99,255,0.06);`;
+                    pin.innerHTML = `
+                        ${article.thumbnail
+                            ? `<img src="${this.esc(article.thumbnail)}" 
+                                style="width:36px;height:36px;border-radius:6px;object-fit:cover;flex-shrink:0"
+                                onerror="this.style.display='none'">`
+                            : `<i class="ti ti-newspaper" style="color:var(--text-muted);flex-shrink:0"></i>`}
+                        <div style="flex:1;min-width:0">
+                            <div style="font-size:12.5px;font-weight:600;color:var(--text-primary);
+                                        white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                                ${this.esc(article.article_title || article.article_url)}
+                            </div>
+                            <div style="font-size:11px;color:var(--text-muted)">
+                                ${this.esc(article.source_name || '')} · pinned by ${this.esc(article.shared_by_name)}
+                            </div>
+                        </div>
+                        <a href="${this.esc(article.article_url)}" target="_blank"
+                        style="color:var(--accent);font-size:13px;flex-shrink:0"
+                        onclick="event.stopPropagation();ArticlesAPI.recordView(${article.id})">
+                            <i class="ti ti-external-link"></i>
+                        </a>
+                        ${Auth.isAdmin() || article.shared_by == Auth.getUser()?.id ? `
+                        <button title="Unpin"
+                            onclick="event.stopPropagation();App.unpinArticle(${article.id})"
+                            style="background:none;border:none;cursor:pointer;
+                                color:var(--accent-2);font-size:13px;
+                                padding:4px 6px;border-radius:6px;flex-shrink:0">
+                            <i class="ti ti-pin"></i>
+                        </button>` : ''}`;
+                    pinnedSection.appendChild(pin);
+                });
+            }
+
+        // Render unpinned into scrollable feed
+        if (unpinned.length > 0) {
+            unpinned.forEach(article =>
+                unpinnedFeed.appendChild(this.buildArticleCard(article))
+            );
+            // Scroll unpinned to bottom (latest article)
+            requestAnimationFrame(() => {
+                unpinnedFeed.scrollTop = unpinnedFeed.scrollHeight;
+            });
+        }
+    },
+
+    buildArticleCard(article) {
+        const isPinned = article.is_pinned == 1;
+        const isFwd    = article.is_forwarded == 1;
+        const initials = article.shared_by_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+        const time     = this.timeAgo(article.created_at);
+        const canUnpin  = isPinned && (Auth.isAdmin() || article.shared_by == Auth.getUser()?.id);
+
+        const reactEmojis = ['👍','❤️','😂','😮','🔥','👏'];
+        const reactionsMap = {};
+        (article.reactions || []).forEach(r => reactionsMap[r.reaction_type] = parseInt(r.cnt));
+        const reactHTML = reactEmojis.map(e => {
+            const cnt  = reactionsMap[e] || 0;
+            const mine = article.my_reaction === e;
+            if (cnt === 0 && !mine) return '';
+            return `<div class="reaction-chip ${mine?'active':''}" data-emoji="${e}" data-article-id="${article.id}">
+                <span>${e}</span><span class="rc">${cnt}</span>
+            </div>`;
+        }).join('');
+
+        const card = document.createElement('div');
+        card.className = 'article-card' + (isPinned ? ' pinned' : '');
+        card.dataset.articleId = article.id;
+        card.innerHTML = `
+            <div class="article-meta">
+                <div class="avatar" style="width:26px;height:26px;font-size:10px;background:linear-gradient(135deg,var(--accent),var(--accent2))">${initials}</div>
+                <div>
+                    <div class="article-author">${this.esc(article.shared_by_name)}
+                        <span class="tag tag-${article.shared_by_role==='admin'?'purple':'teal'}" style="margin-left:6px">${article.shared_by_role}</span>
+                    </div>
+                </div>
+                <span class="article-time">${time}</span>
+                ${isPinned ? '<div class="pin-badge"><i class="ti ti-pin" style="font-size:11px"></i> Pinned</div>' : ''}
+            </div>
+            ${isFwd ? '<div style="padding:0 16px 4px"><div class="forwarded-label"><i class="ti ti-corner-right-up"></i> Forwarded</div></div>' : ''}
+            <a href="${this.esc(article.article_url)}" target="_blank" rel="noopener" class="article-preview" style="text-decoration:none">
+                <div class="article-img">
+                    ${article.thumbnail
+                        ? `<img src="${this.esc(article.thumbnail)}" alt="" onerror="this.parentElement.innerHTML='<div class=img-placeholder><i class=ti ti-newspaper></i></div>'">`
+                        : '<div class="img-placeholder"><i class="ti ti-newspaper"></i></div>'}
+                </div>
+                <div class="article-body">
+                    <div class="article-source">${this.esc(article.source_name || '')}</div>
+                    <div class="article-title-text">${this.esc(article.article_title || article.article_url)}</div>
+                    <div class="article-desc">${this.esc(article.description || '')}</div>
+                </div>
+            </a>
+            
+            
+
+            <div class="article-actions">
+                <div class="reactions">${reactHTML || '<span style="font-size:11px;color:var(--text-muted)">No reactions yet</span>'}</div>
+                <button class="action-btn react-btn" title="React"><i class="ti ti-mood-smile"></i></button>
+                <button class="action-btn" title="Share on Facebook" onclick="event.stopPropagation();App.shareOnFacebook(${article.id})">
+                    <i class="ti ti-brand-facebook"></i> Share
+                </button>
+                <button class="action-btn forward-article-btn"><i class="ti ti-share"></i> Forward</button>
+                ${canUnpin ? `<button class="action-btn" title="Unpin" onclick="event.stopPropagation();App.unpinArticle(${article.id})">
+                    <i class="ti ti-pin-off" style="color:var(--accent-2);font-size:13px;flex-shrink:0"></i>
+                </button>` : ''}
+                <button class="action-btn ctx-trigger" style="margin-left:auto"><i class="ti ti-dots"></i></button>
+            </div>
+            <div style="padding:0 16px 10px;font-size:11px;color:var(--text-muted)">
+                <i class="ti ti-eye"></i> ${article.view_count || 0} views
+            </div>`;
+
+        card.querySelectorAll('.reaction-chip').forEach(chip =>
+            chip.addEventListener('click', () => this.toggleArticleReaction(chip, article.id)));
+        card.querySelector('.react-btn').addEventListener('click', e => {
+            e.stopPropagation();
+            this.showEmojiPickerFor(e.currentTarget, 'article', article.id);
+        });
+        card.querySelector('.forward-article-btn').addEventListener('click', () =>
+            this.openForwardModal('article', article.id));
+        card.querySelector('.ctx-trigger').addEventListener('click', e => {
+            e.stopPropagation();
+            this.ctxTarget = { type:'article', id:article.id, ownerId:parseInt(article.shared_by) };
+            this.showCtxMenu(e);
+        });
+        card.querySelector('a').addEventListener('click', () => ArticlesAPI.recordView(article.id));
+        return card;
+    },
+
+    // ─────────────────────────────────────────
+    // MESSAGES
+    // ─────────────────────────────────────────
+    async loadMessages() {
+        if (!this.currentGroupId) return;
+        const res = await MessagesAPI.list(this.currentGroupId);
+        if (!res?.success) return;
+        const feed = document.getElementById('msg-feed');
+        if (!feed) return;
+
+        const prevLastId = this._lastMessageId || 0;
+        const newLastId  = res.data.length ? res.data[res.data.length - 1].id : 0;
+
+        feed.innerHTML = '';
+        if (res.data.length === 0) {
+            feed.innerHTML = `<div class="empty-state"><i class="ti ti-message-circle"></i><p>No messages yet. Say hello!</p></div>`;
+            this._lastMessageId = 0;
+            return;
+        }
+        let lastDate = '';
+        res.data.forEach(msg => {
+            const dateStr = new Date(msg.created_at).toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'});
+            if (dateStr !== lastDate) {
+                const d = document.createElement('div');
+                d.className = 'date-divider';
+                d.textContent = dateStr;
+                feed.appendChild(d);
+                lastDate = dateStr;
+            }
+            feed.appendChild(this.buildMessageCard(msg));
+        });
+
+        if (prevLastId > 0 && newLastId > prevLastId) {
+            this.playNotificationSound();
+        }
+        this._lastMessageId = newLastId;
+
+        // setTimeout(() => {
+        //     const chatPanel = document.getElementById('tab-chat');
+        //     if (chatPanel && chatPanel.style.display !== 'none') {
+        //         chatPanel.scrollTop = chatPanel.scrollHeight;
+        //     }
+        // }, 50);
+        //new code
+        setTimeout(() => {
+
+    // Only scroll to bottom during normal chat loading
+            if (!window.location.search.includes('message_id')) {
+
+                const chatPanel = document.getElementById('tab-chat');
+
+                if (chatPanel && chatPanel.style.display !== 'none') {
+                    chatPanel.scrollTop = chatPanel.scrollHeight;
+                }
+            }
+
+        }, 50);
+
+        const latest = res.data[res.data.length - 1];
+        if (latest) MessagesAPI.markSeen(latest.id);
+    },
+
+
+    /*new code*/
+    async loadChannelSearchCache() {
+    if (!this.currentGroupId) return;
+    const [articlesRes, messagesRes, membersRes] = await Promise.all([
+        ArticlesAPI.list(this.currentGroupId),
+        MessagesAPI.list(this.currentGroupId),
+        GroupsAPI.members(this.currentGroupId),
+    ]);
+    this._channelSearchCache = {
+        articles : articlesRes?.success ? articlesRes.data  : [],
+        messages : messagesRes?.success ? messagesRes.data  : [],
+        members  : membersRes?.success  ? membersRes.data   : [],
+    };
+    console.log('Search cache loaded:', this._channelSearchCache);
+},
+
+
+
+
+    /*code end*/
+
+    async pollMessages() {
+        if (!this.currentGroupId || !navigator.onLine) return;
+        try {
+            const res = await MessagesAPI.list(this.currentGroupId);
+            if (!res?.success || !res.data.length) return;
+            const latestId  = res.data[res.data.length - 1].id;
+            const latestMsg = res.data[res.data.length - 1];
+            const me = Auth.getUser();
+
+            if (this._lastMessageId > 0 && latestId > this._lastMessageId) {
+                if (latestMsg.user_id != me?.id) {
+                    this.playNotificationSound();
+                    this.showToast(`💬 ${latestMsg.sender_name}: ${latestMsg.message.slice(0,50)}`, 'ti-message-circle');
+                    await this.loadNotificationBadge();
+                    const chatTab = document.querySelector('.tab[data-tab="tab-chat"]');
+                    if (chatTab?.classList.contains('active')) await this.loadMessages();
+                }
+            }
+            if (!this._lastMessageId) this._lastMessageId = latestId;
+            else this._lastMessageId = latestId;
+        } catch(e) {}
+    },
+
+    buildMessageCard(msg) {
+        const user      = Auth.getUser();
+        const isMe      = msg.user_id == user.id;
+        const initials  = msg.sender_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+        const time      = this.formatTime(msg.created_at);
+        const isDeleted = msg.is_deleted == 1;
+        const isEdited  = msg.is_edited  == 1;
+        const isFwd     = msg.is_forwarded == 1;
+
+        const reactHTML = (msg.reactions || []).filter(r => r.cnt > 0).map(r =>
+            `<div class="reaction-chip" data-emoji="${r.reaction_type}" data-msg-id="${msg.id}">
+                <span>${r.reaction_type}</span><span class="rc">${r.cnt}</span>
+            </div>`).join('');
+
+        const el = document.createElement('div');
+        el.className = 'msg-card';
+        el.dataset.msgId = msg.id;
+        el.innerHTML = `
+            <div class="avatar" style="align-self:flex-start;margin-top:2px;background:linear-gradient(135deg,${isMe?'var(--accent3),#0984e3':'var(--accent),var(--accent2)'});font-size:10px">${initials}</div>
+            <div class="msg-body">
+                <div class="msg-header">
+                    <span class="msg-sender" style="color:${isMe?'var(--accent3)':'var(--accent)'}">${this.esc(msg.sender_name)}</span>
+                    <span class="msg-ts">${time}${isEdited&&!isDeleted?' <span style="color:var(--text-muted);font-size:10px">(edited)</span>':''}</span>
+                </div>
+                ${msg.reply_to && msg.reply_text ? `
+                <div class="reply-preview">
+                    <div class="reply-author">${this.esc(msg.reply_sender_name||'')}</div>
+                    <div class="reply-text">${this.esc(msg.reply_text)}</div>
+                </div>` : ''}
+                ${isFwd ? '<div class="forwarded-label"><i class="ti ti-corner-right-up"></i> Forwarded</div>' : ''}
+                <div class="msg-text" style="${isDeleted?'color:var(--text-muted);font-style:italic':''}">${this.esc(msg.message)}</div>
+                ${reactHTML ? `<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">${reactHTML}</div>` : ''}
+                ${msg.seen_count > 0 ? `<div class="seen-status"><i class="ti ti-checks"></i> Seen by ${msg.seen_count}</div>` : ''}
+            </div>
+            ${!isDeleted ? `
+            <div class="msg-actions">
+                <button class="msg-action-btn react-msg-btn" title="React"><i class="ti ti-mood-smile"></i></button>
+                <button class="msg-action-btn reply-btn" title="Reply"><i class="ti ti-arrow-back-up"></i></button>
+                <button class="msg-action-btn forward-msg-btn" title="Forward"><i class="ti ti-corner-right-up"></i></button>
+                ${isMe||Auth.isAdmin() ? `<button class="msg-action-btn edit-btn" title="Edit"><i class="ti ti-edit"></i></button>` : ''}
+                ${isMe||Auth.isAdmin() ? `<button class="msg-action-btn del-msg-btn" title="Delete"><i class="ti ti-trash"></i></button>` : ''}
+            </div>` : ''}`;
+
+        el.querySelectorAll('.reaction-chip').forEach(chip =>
+            chip.addEventListener('click', () => this.toggleMsgReaction(chip, msg.id)));
+        el.querySelector('.react-msg-btn')?.addEventListener('click', e => {
+            e.stopPropagation();
+            this.showEmojiPickerFor(e.currentTarget, 'message', msg.id);
+        });
+        el.querySelector('.reply-btn')?.addEventListener('click', () => {
+            this.replyingTo = { id:msg.id, text:msg.message, sender:msg.sender_name };
+            this.showReplyBar();
+        });
+        el.querySelector('.forward-msg-btn')?.addEventListener('click', () =>
+            this.openForwardModal('message', msg.id));
+        el.querySelector('.edit-btn')?.addEventListener('click', () => {
+            this.editingMsgId = msg.id;
+            const inp = document.getElementById('msg-input');
+            if (inp) { inp.value = msg.message; inp.focus(); }
+            this.showToast('Editing – press Enter to save, Esc to cancel', 'ti-edit');
+        });
+        el.querySelector('.del-msg-btn')?.addEventListener('click', async () => {
+            if (!confirm('Delete this message?')) return;
+            const r = await MessagesAPI.delete(msg.id);
+            if (r?.success) { this.showToast('Message deleted', 'ti-check'); await this.loadMessages(); }
+            else this.showToast(r?.message||'Failed', 'ti-alert-circle');
+        });
+        return el;
+    },
+
+    // ─────────────────────────────────────────
+    // RIGHT PANEL MEMBERS
+    // ─────────────────────────────────────────
+    async loadRightPanelMembers() {
+        if (!this.currentGroupId) return;
+        const res = await GroupsAPI.members(this.currentGroupId);
+        if (!res?.success) return;
+        this._currentMembers = res.data;
+        const container = document.getElementById('members-list');
+        if (!container) return;
+        container.innerHTML = '';
+        res.data.forEach(member => {
+            const initials = member.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+            const isOnline = member.last_seen && (Date.now()-new Date(member.last_seen).getTime()) < 5*60*1000;
+            const el = document.createElement('div');
+            el.className = 'member-row';
+            el.innerHTML = `
+                <div class="avatar" style="background:linear-gradient(135deg,var(--accent),var(--accent2));width:28px;height:28px;font-size:10px">${initials}</div>
+                <div style="flex:1">
+                    <div class="member-name">${this.esc(member.name)}</div>
+                    <div class="member-role">${member.role}</div>
+                </div>
+                <div class="${isOnline?'online-dot':'offline-dot'}" title="${isOnline?'Online':'Offline'}"></div>`;
+            container.appendChild(el);
+        });
+        const viewBtn = document.querySelector('[data-modal="modal-members"]');
+        if (viewBtn) viewBtn.innerHTML = `<i class="ti ti-users"></i> Manage ${res.data.length} members`;
+    },
+
+    // ─────────────────────────────────────────
+    // MANAGE MEMBERS MODAL
+    // ─────────────────────────────────────────
+    async openMembersModal() {
+        if (!this.currentGroupId) { this.showToast('Select a group first', 'ti-alert-circle'); return; }
+        const titleEl = document.getElementById('members-modal-title');
+        if (titleEl) titleEl.textContent = `Manage Members – ${this.currentGroupName}`;
+        const addSection = document.getElementById('add-member-section');
+        if (addSection) addSection.style.display = Auth.isAdmin() ? 'block' : 'none';
+        await this.refreshMembersModalList();
+        this.openModal('modal-members');
+    },
+
+    async refreshMembersModalList() {
+        const res = await GroupsAPI.members(this.currentGroupId);
+        if (!res?.success) return;
+        this._currentMembers = res.data;
+
+        const container = document.getElementById('modal-members-list');
+        if (!container) return;
+        container.innerHTML = '';
+
+        res.data.forEach(member => {
+            const initials = member.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+            const isOnline = member.last_seen && (Date.now()-new Date(member.last_seen).getTime()) < 5*60*1000;
+            const isMe     = member.id == Auth.getUser()?.id;
+
+            const el = document.createElement('div');
+            el.className = 'member-modal-row';
+            el.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)';
+            el.innerHTML = `
+                <div class="avatar" style="width:34px;height:34px;font-size:12px;background:linear-gradient(135deg,var(--accent),var(--accent2))">${initials}</div>
+                <div style="flex:1">
+                    <div style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px">
+                        ${this.esc(member.name)}
+                        ${isMe ? '<span style="font-size:10px;color:var(--text-muted)">(you)</span>' : ''}
+                    </div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:1px">${this.esc(member.email||'')} · <span class="tag tag-${member.role==='admin'?'purple':'teal'}" style="padding:1px 6px">${member.role}</span></div>
+                </div>
+                <div class="${isOnline?'online-dot':'offline-dot'}" title="${isOnline?'Online':'Offline'}" style="flex-shrink:0"></div>
+                ${Auth.isAdmin() && !isMe ? `
+                <button class="remove-member-btn" data-uid="${member.id}" data-name="${this.esc(member.name)}"
+                    style="background:rgba(255,101,132,0.1);border:1px solid rgba(255,101,132,0.3);color:var(--accent2);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:4px;white-space:nowrap">
+                    <i class="ti ti-user-minus"></i> Remove
+                </button>` : ''}`;
+
+            el.querySelector('.remove-member-btn')?.addEventListener('click', async (e) => {
+                const uid  = parseInt(e.currentTarget.dataset.uid);
+                const name = e.currentTarget.dataset.name;
+                await this.removeMember(uid, name);
+            });
+            container.appendChild(el);
+        });
+
+        if (res.data.length === 0) {
+            container.innerHTML = `<div style="color:var(--text-muted);font-size:12px;padding:12px 0">No members in this group yet.</div>`;
+        }
+    },
+
+    async removeMember(userId, name) {
+        if (!confirm(`Remove "${name}" from this group?`)) return;
+        const res = await GroupsAPI.removeMember(this.currentGroupId, userId);
+        if (res?.success) {
+            this.showToast(`${name} removed from group`, 'ti-check');
+            await this.refreshMembersModalList();
+            await this.loadRightPanelMembers();
+        } else {
+            this.showToast(res?.message || 'Failed to remove member', 'ti-alert-circle');
+        }
+    },
+
+    async searchUsersToInvite(q) {
+        const resultsBox = document.getElementById('invite-search-results');
+        if (!resultsBox) return;
+        if (!q || q.length < 2) { resultsBox.style.display = 'none'; return; }
+
+        resultsBox.style.display = 'block';
+        resultsBox.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:var(--text-muted)">Searching…</div>';
+
+        const res = await UsersAPI.list(q);
+        if (!res?.success) return;
+
+        const memberIds = this._currentMembers.map(m => parseInt(m.id));
+        const available = res.data.filter(u => !memberIds.includes(parseInt(u.id)));
+
+        resultsBox.innerHTML = '';
+        if (available.length === 0) {
+            resultsBox.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:var(--text-muted)">No users found or all already members</div>';
+            return;
+        }
+
+        available.slice(0, 6).forEach(u => {
+            const initials = u.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+            const el = document.createElement('div');
+            el.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.1s';
+            el.onmouseover = () => el.style.background = 'var(--bg-hover)';
+            el.onmouseout  = () => el.style.background = '';
+            el.innerHTML = `
+                <div class="avatar" style="width:28px;height:28px;font-size:10px;background:linear-gradient(135deg,var(--accent),var(--accent2))">${initials}</div>
+                <div style="flex:1">
+                    <div style="font-size:13px;font-weight:500">${this.esc(u.name)}</div>
+                    <div style="font-size:11px;color:var(--text-muted)">${this.esc(u.email)} · ${u.role}</div>
+                </div>
+                <span style="font-size:11px;color:var(--accent);font-weight:600">Select</span>`;
+            el.addEventListener('click', () => {
+                this._inviteSelectedUser = u;
+                document.getElementById('invite-user-search').value = u.name + ' (' + u.email + ')';
+                resultsBox.style.display = 'none';
+                document.getElementById('confirm-add-btn').style.display = 'flex';
+            });
+            resultsBox.appendChild(el);
+        });
+    },
+
+    async confirmAddMember() {        
+        const u = this._inviteSelectedUser;
+        if (!u) { this.showToast('Please search and select a user first', 'ti-alert-circle'); return; }
+
+        const btn = document.getElementById('confirm-add-btn');
+        if (btn) { btn.textContent = 'Adding…'; btn.disabled = true; }
+
+        const res = await GroupsAPI.addMember(this.currentGroupId, u.id);
+
+        if (btn) { btn.innerHTML = '<i class="ti ti-user-plus"></i> Add to Group'; btn.disabled = false; }
+
+        if (res?.success) {
+            console.log("Test log: " + `${this.currentGroupName}`);
+            this.showToast(`${u.name} added to ${this.currentGroupName}!`, 'ti-check');
+            this._inviteSelectedUser = null;
+            document.getElementById('invite-user-search').value = '';
+            if (btn) btn.style.display = 'none';
+            await this.refreshMembersModalList();
+            await this.loadRightPanelMembers();
+        } else {
+            this.showToast(res?.message || 'Failed to add member', 'ti-alert-circle');
+        }
+    },
+
+    toggleAddMember() {
+        const section = document.getElementById('add-member-section');
+        const btn     = document.getElementById('toggle-add-member-btn');
+        if (!section) return;
+        const isVisible = section.style.display !== 'none';
+        section.style.display = isVisible ? 'none' : 'block';
+        if (btn) btn.innerHTML = isVisible
+            ? '<i class="ti ti-user-plus"></i> Add Member'
+            : '<i class="ti ti-chevron-up"></i> Hide';
+        if (!isVisible) document.getElementById('invite-user-search')?.focus();
+    },
+
+    filterMembersList(q) {
+        document.querySelectorAll('.member-modal-row').forEach(row => {
+            const name = row.querySelector('[style*="font-weight:500"]')?.textContent?.toLowerCase() || '';
+            row.style.display = name.includes(q.toLowerCase()) ? '' : 'none';
+        });
+    },
+
+    // ─────────────────────────────────────────
+    // MESSAGE INPUT
+    // ─────────────────────────────────────────
+    bindMessageInput() {
+        const textarea = document.getElementById('msg-input');
+        if (!textarea) return;
+        textarea.addEventListener('keydown', async e => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); await this.sendOrEditMessage(); }
+            if (e.key === 'Escape') {
+                this.replyingTo = null; this.editingMsgId = null;
+                this.hideReplyBar(); textarea.value = ''; textarea.style.height = 'auto';
+            }
+        });
+        textarea.addEventListener('input', () => {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+        });
+        document.getElementById('send-btn')?.addEventListener('click', () => this.sendOrEditMessage());
+    },
+
+    async sendOrEditMessage() {
+        const textarea = document.getElementById('msg-input');
+        const text = textarea?.value.trim();
+        if (!text || !this.currentGroupId) return;
+
+        if (this.editingMsgId) {
+            const res = await MessagesAPI.edit(this.editingMsgId, text);
+            if (res?.success) { this.showToast('Message updated', 'ti-check'); await this.loadMessages(); }
+            else this.showToast(res?.message || 'Edit failed', 'ti-alert-circle');
+            this.editingMsgId = null;
+        } else {
+            const res = await MessagesAPI.send(this.currentGroupId, text, this.replyingTo?.id || null);
+            if (res?.success) await this.loadMessages();
+            else this.showToast(res?.message || 'Send failed', 'ti-alert-circle');
+            this.replyingTo = null;
+            this.hideReplyBar();
+        }
+        if (textarea) { textarea.value = ''; textarea.style.height = 'auto'; }
+    },
+
+    showReplyBar() {
+        let bar = document.getElementById('reply-bar');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'reply-bar';
+            bar.style.cssText = 'background:var(--bg-card);border-top:1px solid var(--border);padding:8px 20px;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text-secondary);flex-shrink:0';
+            document.querySelector('.message-input-bar')?.before(bar);
+        }
+        bar.innerHTML = `
+            <i class="ti ti-arrow-back-up" style="color:var(--accent);font-size:15px"></i>
+            <span>Replying to <strong>${this.esc(this.replyingTo?.sender)}</strong>: ${this.esc((this.replyingTo?.text||'').slice(0,60))}…</span>
+            <button onclick="App.replyingTo=null;App.hideReplyBar()" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:20px;line-height:1">×</button>`;
+        document.getElementById('msg-input')?.focus();
+    },
+    hideReplyBar() { document.getElementById('reply-bar')?.remove(); },
+
+    toggleMsgEmojiPicker(e) {
+        e.stopPropagation();
+        const picker = document.getElementById('msg-emoji-picker');
+        if (!picker) return;
+        document.getElementById('emoji-picker').style.display = 'none';
+        if (picker.style.display === 'flex') { picker.style.display = 'none'; return; }
+        const rect = e.currentTarget.getBoundingClientRect();
+        picker.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+        picker.style.left   = Math.max(8, rect.left - 100) + 'px';
+        picker.style.display = 'flex';
+    },
+
+    insertMsgEmoji(emoji) {
+        const textarea = document.getElementById('msg-input');
+        if (!textarea) return;
+        const pos = textarea.selectionStart || textarea.value.length;
+        textarea.value = textarea.value.slice(0, pos) + emoji + textarea.value.slice(pos);
+        textarea.focus();
+        textarea.selectionStart = textarea.selectionEnd = pos + emoji.length;
+        document.getElementById('msg-emoji-picker').style.display = 'none';
+    },
+
+    // ─────────────────────────────────────────
+    // SHARE BAR
+    // ─────────────────────────────────────────
+    bindShareBar() {
+        const input = document.getElementById('article-url-input');
+        const btn   = document.getElementById('share-article-btn');
+        if (!input || !btn) return;
+        input.addEventListener('paste', () => setTimeout(() => this.previewOg(input.value.trim()), 300));
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') this.shareArticle(input.value.trim()); });
+        btn.addEventListener('click', () => this.shareArticle(input.value.trim()));
+    },
+
+    async previewOg(url) {
+        if (!url || !url.startsWith('http')) return;
+        const preview = document.getElementById('og-preview');
+        if (!preview) return;
+        preview.style.display = 'flex';
+        preview.innerHTML = '<span style="font-size:12px;color:var(--text-muted);padding:8px 0">Fetching preview…</span>';
+        const res = await ArticlesAPI.fetchOg(url);
+        if (res?.success && res.data?.title) {
+            preview.innerHTML = `
+                <div style="display:flex;gap:10px;align-items:flex-start;background:var(--bg-hover);padding:10px;border-radius:8px;border:1px solid var(--border);width:100%;">
+                    ${res.data.image ? `<img src="${this.esc(res.data.image)}" style="width:60px;height:48px;object-fit:cover;border-radius:6px;flex-shrink:0" onerror="this.style.display='none'">` : ''}
+                    <div style="min-width:0;flex:1">
+                        <div style="font-size:10px;color:var(--accent);font-weight:700;letter-spacing:0.5px">${this.esc(res.data.source||'')}</div>
+                        <div style="font-size:12.5px;font-weight:500;margin-top:2px">${this.esc(res.data.title)}</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${this.esc((res.data.description||'').slice(0,100))}</div>
+                    </div>
+                    <button onclick="document.getElementById('og-preview').style.display='none'" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px">×</button>
+                </div>`;
+        } else { preview.innerHTML = ''; preview.style.display = 'none'; }
+    },
+
+    async shareArticle(url) {
+        if (!url) return;
+        if (!url.startsWith('http')) { this.showToast('Enter a valid URL starting with http', 'ti-alert-circle'); return; }
+        if (!this.currentGroupId)    { this.showToast('Please select a group first', 'ti-alert-circle'); return; }
+        const btn = document.getElementById('share-article-btn');
+        if (btn) { btn.textContent = 'Sharing…'; btn.disabled = true; }
+        const res = await ArticlesAPI.share(this.currentGroupId, url);
+        if (btn) { btn.textContent = 'Share'; btn.disabled = false; }
+        if (res?.success) {
+            document.getElementById('article-url-input').value = '';
+            const ogp = document.getElementById('og-preview');
+            if (ogp) { ogp.innerHTML = ''; ogp.style.display = 'none'; }
+            this.showToast('Article shared!', 'ti-check');
+            await this.loadArticles();
+        } else this.showToast(res?.message || 'Failed to share', 'ti-alert-circle');
+    },
+
+    // ─────────────────────────────────────────
+    // REACTIONS
+    // ─────────────────────────────────────────
+    async toggleArticleReaction(chip, articleId) {
+        const res = await ReactionsAPI.toggle('article', articleId, chip.dataset.emoji);
+        if (res?.success) await this.loadArticles();
+    },
+
+    async toggleMsgReaction(chip, msgId) {
+        const res = await ReactionsAPI.toggle('message', msgId, chip.dataset.emoji);
+        if (res?.success) await this.loadMessages();
+    },
+
+    showEmojiPickerFor(btn, targetType, targetId) {
+        const picker = document.getElementById('emoji-picker');
+        if (!picker) return;
+        document.getElementById('msg-emoji-picker').style.display = 'none';
+        picker.dataset.targetType = targetType;
+        picker.dataset.targetId   = targetId;
+        const rect = btn.getBoundingClientRect();
+        picker.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+        picker.style.left   = Math.max(8, rect.left) + 'px';
+        picker.style.display = picker.style.display === 'flex' ? 'none' : 'flex';
+    },
+
+    async pickEmoji(emoji) {
+        const picker     = document.getElementById('emoji-picker');
+        const targetType = picker?.dataset.targetType;
+        const targetId   = parseInt(picker?.dataset.targetId);
+        if (!targetType || !targetId) return;
+        picker.style.display = 'none';
+        const res = await ReactionsAPI.toggle(targetType, targetId, emoji);
+        if (res?.success) {
+            if (targetType === 'article') await this.loadArticles();
+            else await this.loadMessages();
+        }
+    },
+
+    // ─────────────────────────────────────────
+    // THEME TOGGLE
+    // ─────────────────────────────────────────
+    bindThemeToggle() {
+        const btn = document.getElementById('theme-toggle');
+        if (!btn) return;
+        const icon = btn.querySelector('i');
+        if (localStorage.getItem('theme') === 'light') {
+            document.body.classList.add('light');
+            if (icon) icon.className = 'ti ti-moon';
+        }
+        btn.addEventListener('click', () => {
+            document.body.classList.toggle('light');
+            const isLight = document.body.classList.contains('light');
+            if (icon) icon.className = isLight ? 'ti ti-moon' : 'ti ti-sun';
+            localStorage.setItem('theme', isLight ? 'light' : 'dark');
+        });
+    },
+
+    // ─────────────────────────────────────────
+    // NOTIFICATIONS
+    // ─────────────────────────────────────────
+    async loadNotificationBadge() {
+        const res   = await NotificationsAPI.unreadCount();
+        const badge = document.getElementById('notif-badge');
+        if (!badge) return;
+        const cnt     = res?.data?.cnt || 0;
+        const prevCnt = parseInt(badge.textContent) || 0;
+        if (cnt > prevCnt && prevCnt >= 0 && badge.style.display !== 'none') {
+            this.playNotificationSound();
+        }
+        badge.textContent   = cnt;
+        badge.style.display = cnt > 0 ? 'inline-flex' : 'none';
+    },
+
+    async loadNotifications() {
+        console.log("Loading notifications...");
+        const res  = await NotificationsAPI.list();
+        const feed = document.getElementById('notifications-feed');
+        if (!feed) return;
+        feed.innerHTML = '';
+        if (!res?.success || res.data.length === 0) {
+            feed.innerHTML = `<div class="empty-state"><i class="ti ti-bell-off"></i><p>No notifications yet</p></div>`;
+            return;
+        }
+
+        const hasGroupInvite = res.data.some(n => n.notification_type === 'group_invite');
+        if (hasGroupInvite) await this.loadGroups(false);
+
+        const iconMap = {
+            reply:          { icon:'ti-arrow-back-up', bg:'var(--accent-soft)',      fg:'var(--accent)'  },
+            pin:            { icon:'ti-pin',           bg:'rgba(255,101,132,0.12)', fg:'var(--accent2)' },
+            group_invite:   { icon:'ti-users',         bg:'rgba(67,217,173,0.12)',  fg:'var(--accent3)' },
+            reaction:       { icon:'ti-mood-smile',    bg:'var(--accent-soft)',      fg:'var(--accent)'  },
+            article_shared: { icon:'ti-newspaper',     bg:'#81c784',   fg:'#f9ca24'        },
+            new_message:    { icon:'ti-message-circle', bg:'rgba(108,99,255,0.12)',  fg:'var(--accent)'  },
+        };
+
+        res.data.forEach(n => {
+            const cfg = iconMap[n.notification_type] ||
+                        { icon:'ti-bell', bg:'var(--bg-hover)', fg:'var(--text-muted)' };
+            const el  = document.createElement('div');
+            el.className = `notif-item notif-${n.notification_type}${n.is_read == 0 ? ' unread' : ''}`;
+            el.innerHTML = `
+                <div class="notif-icon" style="background:${cfg.bg};color:${cfg.fg}">
+                    <i class="ti ${cfg.icon}"></i>
+                </div>
+                <div class="notif-text">
+                    ${this.esc(n.message)}
+                    <div class="notif-time">${this.timeAgo(n.created_at)}</div>
+                </div>
+                ${n.group_id ? `<i class="ti ti-chevron-right"
+                    style="color:var(--text-muted);font-size:14px;flex-shrink:0"></i>` : ''}`;
+
+            // Single clean click handler — no nesting
+            el.addEventListener('click', async () => {
+                el.classList.remove('unread');
+                await NotificationsAPI.markRead(n.id);
+                this.loadNotificationBadge();
+
+                if (!n.group_id) return;
+
+                // Refresh sidebar groups first, so newly joined groups become visible
+                await this.loadGroups(false);
+
+                const groupItem = document.querySelector(
+                    `.group-item[data-group-id="${n.group_id}"]`
+                );
+                if (!groupItem) {
+                    this.showToast('Group not found', 'ti-alert-circle');
+                    return;
+                }
+
+                const groupName = groupItem.querySelector('.group-name')?.textContent || '';
+
+                // Navigate to feed
+                this.navigateTo('feed');
+                document.querySelectorAll('.sidebar-item[data-page]')
+                        .forEach(i => i.classList.remove('active'));
+                document.querySelector('[data-page="feed"]')?.classList.add('active');
+                window.history.pushState({}, '', `?group_id=${n.group_id}`);
+
+                // Select group and switch to chat
+                await this.selectGroup(n.group_id, groupName);
+                document.querySelector('.tab[data-tab="tab-chat"]')?.click();
+
+                // Scroll to specific message
+                if (n.reference_id) {
+                    await this.loadMessages();
+                    setTimeout(() => {
+                        const msgEl = document.querySelector(
+                            `.msg-card[data-msg-id="${n.reference_id}"]`
+                        );
+                        if (msgEl) {
+                            msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            msgEl.style.outline      = '2px solid var(--accent)';
+                            msgEl.style.borderRadius = '8px';
+                            setTimeout(() => msgEl.style.outline = '', 2500);
+                        } else {
+                            this.showToast('Message not found', 'ti-alert-circle');
+                        }
+                    }, 500);
+                }
+            });
+
+            feed.appendChild(el);
+        });
+    },
+
+    // ─────────────────────────────────────────
+    // ANALYTICS
+    // ─────────────────────────────────────────
+    async loadAnalytics() {
+        const [overview, groups, articles] = await Promise.all([
+            AnalyticsAPI.overview(),
+            AnalyticsAPI.activeGroups(),
+            AnalyticsAPI.topArticles(),
+        ]);
+        if (overview?.success) {
+            const d = overview.data;
+            [['stat-views',d.total_views],['stat-articles',d.articles_this_month],
+             ['stat-messages',d.messages_this_month],['stat-users',d.active_users]
+            ].forEach(([id,v]) => { const el=document.getElementById(id); if(el) el.textContent=v??'–'; });
+        }
+        if (groups?.success) {
+            const c = document.getElementById('groups-chart'); if (!c) return;
+            c.innerHTML = '';
+            const max = Math.max(...groups.data.map(g => g.activity_score), 1);
+            groups.data.forEach(g => {
+                const pct = Math.round((g.activity_score / max) * 100);
+                c.innerHTML += `
+                    <div class="bar-row">
+                        <span class="bar-label" style="min-width:130px;font-size:12px">${this.esc(g.name)}</span>
+                        <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:var(--accent)"></div></div>
+                        <span class="bar-val">${g.activity_score}</span>
+                    </div>`;
+            });
+        }
+        if (articles?.success) {
+            const c = document.getElementById('top-articles-list'); if (!c) return;
+            c.innerHTML = '';
+            if (articles.data.length === 0) { c.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0">No articles shared yet</div>'; return; }
+            articles.data.slice(0,5).forEach((a,i) => {
+                c.innerHTML += `
+                    <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+                        <span style="font-family:var(--font-head);font-size:16px;font-weight:700;color:var(--accent);min-width:24px">${i+1}</span>
+                        <div style="flex:1;min-width:0">
+                            <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${this.esc(a.article_title||a.article_url)}</div>
+                            <div style="font-size:11px;color:var(--text-muted)">${this.esc(a.source_name||'')} · ${a.view_count} views</div>
+                        </div>
+                    </div>`;
+            });
+        }
+    },
+
+    // ─────────────────────────────────────────
+    // GLOBAL SEARCH (Search page)
+    // ─────────────────────────────────────────
+    initSearch() {
+        const input = document.getElementById('global-search-input') || document.querySelector('#page-search input[type="text"]');
+        if (!input || input.dataset.bound) return;
+        input.dataset.bound = '1';
+        input.addEventListener('input', () => this.doSearch(input.value.trim()));
+    },
+
+    /*async doSearch(q) {
+        const container = document.getElementById('search-results-container') || document.querySelector('#page-search .search-results');
+        if (!container) return;
+        if (!q) { container.style.opacity = '0.4'; return; }
+        container.style.opacity = '1';
+        container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0">Searching…</div>';
+
+        const [usersRes, groupsRes, articlesRes] = await Promise.all([
+            UsersAPI.list(q),
+            GroupsAPI.list(),
+            this.currentGroupId ? ArticlesAPI.list(this.currentGroupId) : Promise.resolve(null),
+        ]);
+        container.innerHTML = '';
+
+        if (articlesRes?.success) {
+            const matched = articlesRes.data.filter(a =>
+                (a.article_title||'').toLowerCase().includes(q.toLowerCase()) ||
+                (a.source_name||'').toLowerCase().includes(q.toLowerCase()) ||
+                (a.description||'').toLowerCase().includes(q.toLowerCase())
+            );
+            if (matched.length > 0) {
+                container.innerHTML += `<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px">ARTICLES</div>`;
+                matched.slice(0,5).forEach(a => {
+                    container.innerHTML += `
+                        <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="window.open('${this.esc(a.article_url)}','_blank')">
+                            <i class="ti ti-newspaper" style="color:var(--accent);font-size:20px;flex-shrink:0"></i>
+                            <div style="min-width:0;flex:1">
+                                <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${this.esc(a.article_title||a.article_url)}</div>
+                                <div style="font-size:11px;color:var(--text-muted)">${this.esc(a.source_name||'')} · shared by ${this.esc(a.shared_by_name)}</div>
+                            </div>
+                        </div>`;
+                });
+            }
+        }
+
+        if (usersRes?.success && usersRes.data.length > 0) {
+            container.innerHTML += `<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;margin-top:12px">MEMBERS</div>`;
+            usersRes.data.slice(0,5).forEach(u => {
+                const initials = u.name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2);
+                container.innerHTML += `
+                    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+                        <div class="avatar" style="width:30px;height:30px;font-size:11px;background:linear-gradient(135deg,var(--accent),var(--accent2))">${initials}</div>
+                        <div><div style="font-size:13px;font-weight:500">${this.esc(u.name)}</div>
+                        <div style="font-size:11px;color:var(--text-muted)">${this.esc(u.email)} · ${u.role}</div></div>
+                    </div>`;
+            });
+        }
+
+        if (groupsRes?.success) {
+            const matching = groupsRes.data.filter(g => g.name.toLowerCase().includes(q.toLowerCase()));
+            if (matching.length > 0) {
+                container.innerHTML += `<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-bottom:8px;margin-top:12px">GROUPS</div>`;
+                matching.forEach(g => {
+                    container.innerHTML += `
+                        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="App.selectGroup(${g.id},'${this.esc(g.name)}')">
+                            <i class="ti ti-users" style="color:var(--accent);font-size:18px"></i>
+                            <div><div style="font-size:13px;font-weight:500">${this.esc(g.name)}</div>
+                            <div style="font-size:11px;color:var(--text-muted)">${g.member_count} members</div></div>
+                        </div>`;
+                });
+            }
+        }
+
+        if (!container.innerHTML) {
+            container.innerHTML = `<div class="empty-state" style="padding:20px"><i class="ti ti-search"></i><p>No results for "${this.esc(q)}"</p></div>`;
+        }
+    },*/
+
+
+    async doSearch(q) {
+    const container = document.getElementById('search-results-container') || document.querySelector('#page-search .search-results');
+    if (!container) return;
+    if (!q) {
+        container.style.opacity = '0.4';
+        container.innerHTML = `
+            <div class="empty-state" style="padding:30px">
+                <i class="ti ti-search"></i>
+                <p>Type to search articles, members, groups…</p>
+            </div>`;
+        return;
+    }
+    container.style.opacity = '1';
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0"><i class="ti ti-loader" style="font-size:14px"></i> Searching…</div>';
+
+    // console.log("test grp", groupsRes);
+    // ✅ Fetch ALL groups first, then fetch articles from every group
+    const [usersRes, groupsRes] = await Promise.all([
+        UsersAPI.list(q),
+        GroupsAPI.list(),
+    ]);
+
+    // ✅ Fetch articles from ALL groups in parallel
+    let allArticles = [];
+    if (groupsRes?.success && groupsRes.data.length > 0) {
+        const articleFetches = groupsRes.data.map(g => ArticlesAPI.list(g.id));
+        const articleResults = await Promise.all(articleFetches);
+        articleResults.forEach((res, i) => {
+            if (res?.success) {
+                res.data.forEach(a => {
+                    // Attach group name to each article for display
+                    a._groupName = groupsRes.data[i].name;
+                    allArticles.push(a);
+                });
+            }
+        });
+    }
+
+    container.innerHTML = '';
+
+    // ✅ Filter articles by keyword across all groups
+    const qLower = q.toLowerCase();
+  /* const matchedArticles = allArticles.filter(a =>
+        (a.article_title || '').toLowerCase().includes(qLower) ||
+        (a.source_name || '').toLowerCase().includes(qLower) ||
+        (a.description || '').toLowerCase().includes(qLower)
+    );*/
+
+    //new code
+// const matchedArticles = (filter === 'all' || filter === 'articles')
+//     ? articles.filter(a =>
+//         console.log("Filtering article:", a.article_title);
+//         (a.article_title  || '').toLowerCase().includes(ql) ||
+//         (a.source_name    || '').toLowerCase().includes(ql) ||
+//         (a.description    || '').toLowerCase().includes(ql) ||
+//         (a.shared_by_name || '').toLowerCase().includes(ql) ||
+//         (a.article_url    || '').toLowerCase().includes(ql))  : [];
+
+// const matchedArticles = (filter === 'all' || filter === 'articles')
+//     ? articles.filter(a => {
+//         console.log("Filtering article:", a.article_title, a.source_name, a.article_url);
+//         return (
+//             (a.article_title  || '').toLowerCase().includes(ql) ||
+//             (a.source_name    || '').toLowerCase().includes(ql) ||
+//             (a.description    || '').toLowerCase().includes(ql) ||
+//             (a.shared_by_name || '').toLowerCase().includes(ql) ||
+//             (a.article_url    || '').toLowerCase().includes(ql)
+//         );
+//     })
+//     : [];
+
+
+const matchedArticles = allArticles.filter(a =>
+    (a.article_title  || '').toLowerCase().includes(qLower) ||
+    (a.source_name    || '').toLowerCase().includes(qLower) ||
+    (a.description    || '').toLowerCase().includes(qLower) ||
+    (a.shared_by_name || '').toLowerCase().includes(qLower) ||
+    (a.article_url    || '').toLowerCase().includes(qLower)
+);
+
+
+    //code end
+
+    if (matchedArticles.length > 0) {
+        container.innerHTML += `
+            <div style="font-size:10px;font-weight:700;letter-spacing:1px;
+                        text-transform:uppercase;color:var(--text-muted);
+                        margin-bottom:8px">
+                ARTICLES (${matchedArticles.length})
+            </div>`;
+        matchedArticles.slice(0, 10).forEach(a => {
+            container.innerHTML += `
+                <div style="display:flex;align-items:center;gap:12px;padding:10px 0;
+                            border-bottom:1px solid var(--border);cursor:pointer"
+                     onclick="window.open('${this.esc(a.article_url)}','_blank')">
+                    <i class="ti ti-newspaper" style="color:var(--accent);font-size:20px;flex-shrink:0"></i>
+                    <div style="min-width:0;flex:1">
+                        <div style="font-size:13px;font-weight:500;white-space:nowrap;
+                                    overflow:hidden;text-overflow:ellipsis">
+                            ${this.esc(a.article_title || a.article_url)}
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted)">
+                            ${this.esc(a.source_name || '')} · 
+                            shared by ${this.esc(a.shared_by_name)} · 
+                            <span style="color:var(--accent)">
+                                ${this.esc(a._groupName)}
+                            </span>
+                        </div>
+                    </div>
+                </div>`;
+        });
+        
+    }
+        
+
+    //new code
+
+
+    //code end
+
+    if (usersRes?.success && usersRes.data.length > 0) {
+        container.innerHTML += `
+            <div style="font-size:10px;font-weight:700;letter-spacing:1px;
+                        text-transform:uppercase;color:var(--text-muted);
+                        margin-bottom:8px;margin-top:12px">
+                MEMBERS (${usersRes.data.length})
+            </div>`;
+        usersRes.data.slice(0, 5).forEach(u => {
+            const initials = u.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+            container.innerHTML += `
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
+                            border-bottom:1px solid var(--border)">
+                    <div class="avatar" style="width:30px;height:30px;font-size:11px;
+                                               background:linear-gradient(135deg,var(--accent),var(--accent-2))">
+                        ${initials}
+                    </div>
+                    <div>
+                        <div style="font-size:13px;font-weight:500">${this.esc(u.name)}</div>
+                        <div style="font-size:11px;color:var(--text-muted)">
+                            ${this.esc(u.email)} · ${u.role}
+                        </div>
+                    </div>
+                </div>`;
+        });
+    }
+
+    if (groupsRes?.success) {
+        const matchingGroups = groupsRes.data.filter(g =>
+            g.name.toLowerCase().includes(qLower)
+        );
+        if (matchingGroups.length > 0) {
+            container.innerHTML += `
+                <div style="font-size:10px;font-weight:700;letter-spacing:1px;
+                            text-transform:uppercase;color:var(--text-muted);
+                            margin-bottom:8px;margin-top:12px">
+                    GROUPS (${matchingGroups.length})
+                </div>`;
+            matchingGroups.forEach(g => {
+                container.innerHTML += `
+                    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;
+                                border-bottom:1px solid var(--border);cursor:pointer"
+                         onclick="App.selectGroup(${g.id},'${this.esc(g.name)}')">
+                        <i class="ti ti-users" style="color:var(--accent);font-size:18px"></i>
+                        <div>
+                            <div style="font-size:13px;font-weight:500">${this.esc(g.name)}</div>
+                            <div style="font-size:11px;color:var(--text-muted)">
+                                ${g.member_count} members
+                            </div>
+                        </div>
+                    </div>`;
+            });
+        }
+    }
+
+    if (!container.innerHTML) {
+        container.innerHTML = `
+            <div class="empty-state" style="padding:20px">
+                <i class="ti ti-search"></i>
+                <p>No results for "${this.esc(q)}"</p>
+            </div>`;
+    }
+},
+
+    // ─────────────────────────────────────────
+    // CHANNEL SEARCH (search within current group)
+    // ─────────────────────────────────────────
+    _channelSearchFilter: 'all',
+    _channelSearchCache:  { articles: [], messages: [], members: [] },
+    _channelSearchOpen:   false,
+
+    toggleChannelSearch() {
+    console.log("testing channel search");
+    const panel   = document.getElementById('channel-search-panel');
+    const results = document.getElementById('channel-search-results');
+    const btn     = document.getElementById('channel-search-btn');
+
+    if (!panel) return;
+
+    this._channelSearchOpen = !this._channelSearchOpen;
+
+    if (!this._channelSearchOpen) {
+        panel.style.display = 'none';
+        if (results) {
+            results.style.display = 'none';
+        }
+        btn?.classList.remove('active');
+        this.clearChannelSearch();
+        return;
+    }
+
+    panel.style.display = 'block';
+    btn?.classList.add('active');
+    this._loadChannelSearchData().then(() => {
+        document.getElementById('channel-search-input')?.focus();
+    });
+},
+    async _loadChannelSearchData() {
+        // console.log("searching data within the channel")
+        if (!this.currentGroupId) return;
+        console.log("loading search data for group", this.currentGroupId);
+        try {
+            const [aRes, mRes, mbRes] = await Promise.all([
+                ArticlesAPI.list(this.currentGroupId),
+                MessagesAPI.list(this.currentGroupId),
+                GroupsAPI.members(this.currentGroupId),
+            ]);
+            this._channelSearchCache = {
+                articles: aRes?.data  || [],
+                messages: mRes?.data  || [],
+                members:  mbRes?.data || [],
+            };
+        } catch(e) {
+            this.showToast('Search data failed to load', 'ti-alert-circle');
+        }
+    },
+
+    setChannelSearchFilter(filter, btn) {
+        this._channelSearchFilter = filter;
+        document.querySelectorAll('.csr-pill').forEach(p => p.classList.remove('active'));
+        btn?.classList.add('active');
+        const q = document.getElementById('channel-search-input')?.value.trim() || '';
+        this.runChannelSearch(q);
+    },
+
+    runChannelSearch(q) {
+        console.log("loading channel search function");
+        const resultsBox = document.getElementById('channel-search-results');
+        const countEl   = document.getElementById('channel-search-count');
+        const clearBtn  = document.getElementById('channel-search-clear');
+        if (!resultsBox) return;
+        if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+       // if (!q || q.length < 2) { //updated condition
+       console.log("test data", q.length);
+          if (!q || q.length < 1 ) {
+            resultsBox.style.display = 'none';
+            if (countEl) countEl.style.display = 'none';
+            return;
+        }
+        const ql     = q.toLowerCase();
+        console.log("running channel search for query:", q);
+        const filter = this._channelSearchFilter;
+        console.log("current search filter:", filter);
+        const { articles, messages, members } = this._channelSearchCache;
+        const matchedArticles = (filter === 'all' || filter === 'articles')
+            ? articles.filter(a =>
+                (a.article_title  || '').toLowerCase().includes(ql) ||
+                (a.source_name    || '').toLowerCase().includes(ql) ||
+                (a.description    || '').toLowerCase().includes(ql) ||
+                (a.shared_by_name || '').toLowerCase().includes(ql) ||
+                (a.article_url   || '').toLowerCase().includes(ql)  ||
+                (a.article_url    || '').toLowerCase().includes(ql)) 
+            : [];
+        console.log("Matched articles:", matchedArticles);
+        const matchedMessages = (filter === 'all' || filter === 'messages')
+            ? messages.filter(m =>
+                m.is_deleted != 1 && (
+                (m.message     || '').toLowerCase().includes(ql) ||
+                (m.sender_name || '').toLowerCase().includes(ql)))
+            : [];
+
+        const matchedMembers = (filter === 'all' || filter === 'members')
+            ? members.filter(mb =>
+                (mb.name  || '').toLowerCase().includes(ql) ||
+                (mb.email || '').toLowerCase().includes(ql) ||
+                (mb.role  || '').toLowerCase().includes(ql))
+            : [];
+
+        const total = matchedArticles.length + matchedMessages.length + matchedMembers.length;
+        console.log(`Channel search results for "${q}" - Articles: ${matchedArticles.length}, Messages: ${matchedMessages.length}, Members: ${matchedMembers.length}`);
+        console.log(`Search results - Articles: ${matchedArticles.length}, Messages: ${matchedMessages.length}, Members: ${matchedMembers.length}`);
+        if (countEl) {
+            console.log("countEL found", countEl);
+            countEl.textContent   = total ? `${total} result${total !== 1 ? 's' : ''}` : 'No results';
+            countEl.style.display = 'inline';
+        }
+
+        resultsBox.style.display = 'block';
+        resultsBox.innerHTML = '';
+
+        if (total === 0) {
+            resultsBox.innerHTML = `
+                <div style="padding:24px;text-align:center;color:var(--text-muted)">
+                    <i class="ti ti-search" style="font-size:28px;opacity:0.3;display:block;margin-bottom:8px"></i>
+                    <div style="font-size:13px">No results for <strong>"${this.esc(q)}"</strong></div>
+                    <div style="font-size:11px;margin-top:4px">Try different keywords or change the filter</div>
+                </div>`;
+            return;
+        }
+
+        // ── Articles ──
+        if (matchedArticles.length > 0) {
+            resultsBox.appendChild(this._csrSectionHeader('Articles', matchedArticles.length, 'ti-newspaper', 'var(--accent)'));
+            matchedArticles.slice(0, 5).forEach(a => {
+                const row = document.createElement('div');
+                row.style.cssText = `display:flex;align-items:center;gap:12px;padding:10px 16px;
+                    cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.1s`;
+                row.onmouseover = () => row.style.background = 'var(--bg-hover)';
+                row.onmouseout  = () => row.style.background = '';
+                row.innerHTML = `
+                    <div style="width:38px;height:38px;border-radius:8px;flex-shrink:0;overflow:hidden;
+                         background:var(--bg-secondary);display:flex;align-items:center;justify-content:center">
+                        ${a.thumbnail
+                            ? `<img src="${this.esc(a.thumbnail)}" style="width:100%;height:100%;object-fit:cover"
+                                   onerror="this.parentElement.innerHTML='<i class=ti ti-newspaper style=color:var(--text-muted)></i>'">`
+                            : `<i class="ti ti-newspaper" style="color:var(--text-muted)"></i>`}
+                    </div>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                            ${this._csrHighlight(this.esc(a.article_title || a.article_url), q)}
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
+                            ${this.esc(a.source_name || '')} · by ${this.esc(a.shared_by_name)}
+                            · ${this.timeAgo(a.created_at)}
+                            ${a.is_pinned == 1 ? ' · <i class="ti ti-pin" style="color:var(--accent)"></i>' : ''}
+                        </div>
+                    </div>
+                    <i class="ti ti-external-link" style="color:var(--text-muted);font-size:14px;flex-shrink:0"></i>`;
+                row.addEventListener('click', () => {
+                    window.open(a.article_url, '_blank');
+                    ArticlesAPI.recordView(a.id);
+                });
+                resultsBox.appendChild(row);
+            });
+            if (matchedArticles.length > 5)
+                resultsBox.appendChild(this._csrMoreRow(`+${matchedArticles.length - 5} more articles`));
+        }
+
+        // ── Messages ──
+        if (matchedMessages.length > 0) {
+            resultsBox.appendChild(this._csrSectionHeader('Messages', matchedMessages.length, 'ti-message-circle', 'var(--accent-3)'));
+            matchedMessages.slice(0, 5).forEach(m => {
+                const initials = m.sender_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+                const row = document.createElement('div');
+                row.style.cssText = `display:flex;align-items:center;gap:12px;padding:10px 16px;
+                    cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.1s`;
+                row.onmouseover = () => row.style.background = 'var(--bg-hover)';
+                row.onmouseout  = () => row.style.background = '';
+                row.innerHTML = `
+                    <div class="avatar" style="width:32px;height:32px;font-size:11px;flex-shrink:0;
+                         background:linear-gradient(135deg,var(--accent),var(--accent2))">${initials}</div>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-size:12px;font-weight:600;color:var(--accent)">
+                            ${this.esc(m.sender_name)}
+                            <span style="color:var(--text-muted);font-weight:400;margin-left:6px;font-size:11px">
+                                ${this.timeAgo(m.created_at)}
+                            </span>
+                        </div>
+                        <div style="font-size:12.5px;color:var(--text-secondary);margin-top:2px;
+                             white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                            ${this._csrHighlight(this.esc(m.message), q)}
+                        </div>
+                    </div>`;
+                row.addEventListener('click', () => {
+                    this.toggleChannelSearch();
+                    document.querySelector('.tab[data-tab="tab-chat"]')?.click();
+                    setTimeout(() => {
+                        const msgEl = document.querySelector(`.msg-card[data-msg-id="${m.id}"]`);
+                        if (msgEl) {
+                            msgEl.scrollIntoView({ behavior:'smooth', block:'center' });
+                            msgEl.style.outline      = '2px solid var(--accent)';
+                            msgEl.style.borderRadius = '8px';
+                            setTimeout(() => msgEl.style.outline = '', 2000);
+                        }
+                    }, 400);
+                });
+                resultsBox.appendChild(row);
+            });
+            if (matchedMessages.length > 5)
+                resultsBox.appendChild(this._csrMoreRow(`+${matchedMessages.length - 5} more messages`));
+        }
+
+        // ── Members ──
+        if (matchedMembers.length > 0) {
+            resultsBox.appendChild(this._csrSectionHeader('Members', matchedMembers.length, 'ti-users', '#f9ca24'));
+            matchedMembers.slice(0, 5).forEach(mb => {
+                const initials = mb.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+                const isOnline = mb.last_seen && (Date.now() - new Date(mb.last_seen).getTime()) < 5 * 60 * 1000;
+                const row = document.createElement('div');
+                row.style.cssText = `display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border)`;
+                row.innerHTML = `
+                    <div class="avatar" style="width:32px;height:32px;font-size:11px;flex-shrink:0;
+                         background:linear-gradient(135deg,var(--accent),var(--accent2))">${initials}</div>
+                    <div style="flex:1">
+                        <div style="font-size:13px;font-weight:500">
+                            ${this._csrHighlight(this.esc(mb.name), q)}
+                            <span class="tag tag-${mb.role === 'admin' ? 'purple' : 'teal'}" style="margin-left:6px">${mb.role}</span>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:1px">
+                            ${this._csrHighlight(this.esc(mb.email || ''), q)}
+                        </div>
+                    </div>
+                    <div class="${isOnline ? 'online-dot' : 'offline-dot'}" title="${isOnline ? 'Online' : 'Offline'}"></div>`;
+                resultsBox.appendChild(row);
+            });
+        }
+    },
+
+    clearChannelSearch() {
+        console.log("testing the clear channel search functionality");
+        const input   = document.getElementById('channel-search-input');
+        const results = document.getElementById('channel-search-results');
+        const count   = document.getElementById('channel-search-count');
+        const clear   = document.getElementById('channel-search-clear');
+        if (input)   input.value = '';
+        if (results) results.style.display = 'none';
+        if (count)   count.style.display   = 'none';
+        if (clear)   clear.style.display   = 'none';
+        console.log("clearing channel search results");
+        document.querySelectorAll('.csr-pill').forEach(p => p.classList.remove('active'));
+        document.querySelector('.csr-pill')?.classList.add('active');
+        this._channelSearchFilter = 'all';
+    },
+
+    _csrSectionHeader(label, count, icon, color) {
+        const el = document.createElement('div');
+        el.style.cssText = `display:flex;align-items:center;gap:8px;padding:6px 16px;
+            background:var(--bg-secondary);border-bottom:1px solid var(--border);
+            font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase`;
+        el.innerHTML = `
+            <i class="ti ${icon}" style="color:${color};font-size:13px"></i>
+            <span style="color:var(--text-muted)">${label}</span>
+            <span style="margin-left:auto;background:var(--bg-hover);border-radius:99px;
+                  padding:1px 7px;font-size:10px;color:var(--text-muted)">${count}</span>`;
+        return el;
+    },
+
+    _csrMoreRow(text) {
+        const el = document.createElement('div');
+        el.style.cssText = `padding:8px 16px;font-size:12px;color:var(--accent);
+            text-align:center;border-bottom:1px solid var(--border);opacity:0.8`;
+        el.textContent = text;
+        return el;
+    },
+
+    _csrHighlight(text, q) {
+        if (!q) return text;
+        const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return text.replace(new RegExp(`(${safe})`, 'gi'),
+            `<mark style="background:rgba(108,99,255,0.25);color:inherit;border-radius:2px;padding:0 2px">$1</mark>`);
+    },
+
+    // ─────────────────────────────────────────
+    // MODALS
+    // ─────────────────────────────────────────
+    bindModals() {
+        document.getElementById('create-group-btn')?.addEventListener('click', async () => {
+            if (!Auth.isAdmin()) { this.showToast('Only admins can create groups', 'ti-lock'); return; }
+            const res = await UsersAPI.list();
+            if (res?.success) {
+                const container = document.getElementById('member-select-list');
+                if (container) {
+                    container.innerHTML = '';
+                    const me = Auth.getUser();
+                    res.data.forEach(u => {
+                        if (u.id == me.id) return;
+                        const li = document.createElement('label');
+                        li.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 4px;cursor:pointer;font-size:13px;color:var(--text-secondary);border-radius:4px';
+                        li.onmouseover = () => li.style.background = 'var(--bg-hover)';
+                        li.onmouseout  = () => li.style.background = '';
+                        const initials = u.name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2);
+                        li.innerHTML = `
+                            <input type="checkbox" value="${u.id}" style="accent-color:var(--accent)">
+                            <div class="avatar" style="width:22px;height:22px;font-size:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));flex-shrink:0">${initials}</div>
+                            ${this.esc(u.name)} <span style="color:var(--text-muted);font-size:11px">(${u.role})</span>`;
+                        container.appendChild(li);
+                    });
+                }
+            }
+            this.openModal('modal-create-group');
+        });
+
+        document.getElementById('create-group-form')?.addEventListener('submit', async e => {
+            e.preventDefault();
+            const name     = document.getElementById('group-name-input')?.value.trim();
+            const desc     = document.getElementById('group-desc-input')?.value.trim();
+            const memberIds = Array.from(document.querySelectorAll('#member-select-list input:checked')).map(i => parseInt(i.value));
+            if (!name) { this.showToast('Group name is required', 'ti-alert-circle'); return; }
+            const btn = e.submitter;
+            if (btn) { btn.textContent = 'Creating…'; btn.disabled = true; }
+            const res = await GroupsAPI.create({ name, description:desc, member_ids:memberIds });
+            if (btn) { btn.textContent = 'Create Group'; btn.disabled = false; }
+            if (res?.success) {
+                this.closeAllModals();
+                document.getElementById('group-name-input').value = '';
+                document.getElementById('group-desc-input').value = '';
+                this.showToast(`Group "${name}" created!`, 'ti-check');
+                await this.loadGroups();
+            } else this.showToast(res?.message || 'Failed to create group', 'ti-alert-circle');
+        });
+
+        document.getElementById('forward-form')?.addEventListener('submit', async e => {
+            e.preventDefault();
+            const groupIds = Array.from(document.querySelectorAll('#forward-group-list input:checked')).map(i => parseInt(i.value));
+            if (!groupIds.length) { this.showToast('Select at least one group', 'ti-alert-circle'); return; }
+            const fwd = this._forwardTarget;
+            // console.log("forwarding", fwd, "to groups", groupIds);
+            const res = fwd?.type === 'article'
+                ? await ArticlesAPI.forward(fwd.id, groupIds)
+                : await MessagesAPI.forward(fwd.id, groupIds);
+            if (res?.success) { this.closeAllModals(); this.showToast('Forwarded successfully!', 'ti-check'); }
+            else this.showToast(res?.message || 'Forward failed', 'ti-alert-circle');
+        });
+
+        document.getElementById('profile-form')?.addEventListener('submit', async e => {
+            e.preventDefault();
+            const payload = {
+                name:      document.getElementById('profile-name-input').value.trim(),
+                job_title: document.getElementById('profile-title-input').value.trim(),
+                org:       document.getElementById('profile-org-input').value.trim(),
+            };
+            if (!payload.name) { this.showToast('Name is required', 'ti-alert-circle'); return; }
+            const res = await UsersAPI.updateProfile(payload);
+            if (res?.success) {
+                const user = Auth.getUser(); user.name = payload.name; Auth.setUser(user);
+                this.renderCurrentUser();
+                this.closeAllModals();
+                this.showToast('Profile updated!', 'ti-check');
+            } else this.showToast(res?.message || 'Failed', 'ti-alert-circle');
+        });
+
+        document.getElementById('change-password-form')?.addEventListener('submit', async e => {
+            e.preventDefault();
+            const cur  = document.getElementById('cur-password').value;
+            const nw   = document.getElementById('new-password').value;
+            const conf = document.getElementById('confirm-password').value;
+            if (nw !== conf) { this.showToast('Passwords do not match', 'ti-alert-circle'); return; }
+            if (nw.length < 8) { this.showToast('Min 8 characters', 'ti-alert-circle'); return; }
+            const res = await UsersAPI.changePassword(cur, nw);
+            if (res?.success) { this.closeAllModals(); this.showToast('Password changed! Logging out…', 'ti-check'); setTimeout(() => AuthAPI.logout(), 1500); }
+            else this.showToast(res?.message || 'Failed', 'ti-alert-circle');
+        });
+
+        document.getElementById('manage-group-form')?.addEventListener('submit', (e) => this.saveGroupSettings(e));
+
+        document.querySelector('[data-modal="modal-members"]')?.addEventListener('click', e => {
+            e.preventDefault();
+            this.openMembersModal();
+        });
+
+        document.querySelectorAll('[title="Members"]').forEach(btn =>
+            btn.addEventListener('click', () => this.openMembersModal()));
+
+        document.querySelector('.avatar[title="My Profile"]')?.addEventListener('click', () => this.openProfileModal());
+
+        document.querySelectorAll('.modal-close, [data-close-modal]').forEach(el =>
+            el.addEventListener('click', () => this.closeAllModals()));
+        document.querySelectorAll('.modal-overlay').forEach(overlay =>
+            overlay.addEventListener('click', e => { if (e.target === overlay) this.closeAllModals(); }));
+    },
+
+    async openForwardModal(type, id) {
+        this._forwardTarget = { type, id };
+        const res = await GroupsAPI.list();
+        const container = document.getElementById('forward-group-list');
+        if (container && res?.success) {
+            container.innerHTML = '';
+            const filtered = res.data.filter(g => g.id !== this.currentGroupId);
+            if (filtered.length === 0) {
+                container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0">No other groups available</div>';
+            } else {
+                filtered.forEach(g => {
+                    const initials = g.name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+                    const li = document.createElement('label');
+                    li.style.cssText = 'display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-secondary)';
+                    li.innerHTML = `
+                        <input type="checkbox" value="${g.id}" style="accent-color:var(--accent)">
+                        <div style="width:26px;height:26px;border-radius:6px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">${initials}</div>
+                        <span style="flex:1">${this.esc(g.name)}</span>
+                        <span style="font-size:11px;color:var(--text-muted)">${g.member_count} members</span>`;
+                    container.appendChild(li);
+                });
+            }
+        }
+        this.openModal('modal-forward');
+    },
+
+    openProfileModal() {
+        const user = Auth.getUser(); if (!user) return;
+        const initials = user.name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2);
+        const el = document.getElementById('profile-avatar'); if (el) el.textContent = initials;
+        document.getElementById('profile-name').textContent  = user.name;
+        document.getElementById('profile-email').textContent = user.email;
+        document.getElementById('profile-role-badge').innerHTML = `<span class="tag tag-${user.role==='admin'?'purple':'teal'}">${user.role}</span>`;
+        document.getElementById('profile-name-input').value  = user.name      || '';
+        document.getElementById('profile-title-input').value = user.job_title || '';
+        document.getElementById('profile-org-input').value   = user.org       || '';
+        this.openModal('modal-profile');
+    },
+
+    openAdminSettingsModal() {
+        if (!Auth.isAdmin()) { this.showToast('Admin access required', 'ti-lock'); return; }
+        const toggle = document.getElementById('allow-author-filter-toggle');
+        if (toggle) toggle.checked = this.allowAuthorFilter;
+        this.openModal('modal-admin-settings');
+    },
+
+    async toggleAuthorFilter(value) {
+        try {
+            const res = await SettingsAPI.set('allow_author_filter', value ? 1 : 0);
+            if (res?.success) {
+                this.allowAuthorFilter = value;
+                this.filterArticles(document.getElementById('article-search-input')?.value || '');
+                this.showToast(`Author filter ${value ? 'enabled' : 'disabled'}`, 'ti-check');
+            } else {
+                this.showToast('Failed to update setting', 'ti-alert-circle');
+            }
+        } catch (err) {
+            console.error('Error toggling author filter:', err);
+            this.showToast('Error updating setting', 'ti-alert-circle');
+        }
+    },
+
+    openModal(id)    { document.getElementById(id)?.classList.add('open'); },
+    closeAllModals() { document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('open')); },
+
+    // ─────────────────────────────────────────
+    // CONTEXT MENU
+    // ─────────────────────────────────────────
+    bindContextMenus() {
+        document.addEventListener('click', e => {
+            if (!e.target.closest('#ctx-menu'))
+                document.getElementById('ctx-menu')?.classList.remove('open');
+            if (!e.target.closest('#emoji-picker') && !e.target.closest('.react-btn,.react-msg-btn'))
+                document.getElementById('emoji-picker').style.display = 'none';
+            if (!e.target.closest('#msg-emoji-picker') && !e.target.closest('#emoji-btn'))
+                document.getElementById('msg-emoji-picker').style.display = 'none';
+            if (!e.target.closest('#invite-search-results') && !e.target.closest('#invite-user-search')) {
+                const c = document.getElementById('invite-search-results');
+                if (c) c.style.display = 'none';
+            }
+            if (!e.target.closest('#group-ctx-menu') && !e.target.closest('.group-item'))
+                document.getElementById('group-ctx-menu')?.classList.remove('open');
+            // Close channel search results on outside click
+            if (!e.target.closest('#channel-search-results') && !e.target.closest('#channel-search-panel'))
+                document.getElementById('channel-search-results')?.style &&
+                (document.getElementById('channel-search-results').style.display = 'none');
+        });
+    },
+
+
+    //search in group
+    bindChannelSearch() {
+
+    const input = document.getElementById('channel-search');
+
+    if (!input) return;
+
+    input.addEventListener('input', () => {
+
+        const q = input.value.toLowerCase().trim();
+
+        // Search messages
+        document.querySelectorAll('.msg-card').forEach(msg => {
+
+            const text =
+                msg.querySelector('.msg-text')?.textContent?.toLowerCase() || '';
+
+            const sender =
+                msg.querySelector('.msg-sender')?.textContent?.toLowerCase() || '';
+
+            const match =
+                text.includes(q) || sender.includes(q);
+
+            msg.style.display = match ? '' : 'none';
+
+        });
+
+        // Search articles
+        document.querySelectorAll('.article-card').forEach(article => {
+
+            const title =
+                article.querySelector('.article-title-text')?.textContent?.toLowerCase() || '';
+
+            const source =
+                article.querySelector('.article-source')?.textContent?.toLowerCase() || '';
+
+            const match =
+                title.includes(q) || source.includes(q);
+
+            article.style.display = match ? '' : 'none';
+
+        });
+
+    });
+
+},
+
+    //code end
+
+    playNotificationSound() {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+        oscillator.frequency.setValueAtTime(660, ctx.currentTime + 0.1);
+        gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        oscillator.start(ctx.currentTime);
+        oscillator.stop(ctx.currentTime + 0.3);
+    },
+
+    showCtxMenu(e) {
+        const menu = document.getElementById('ctx-menu'); if (!menu) return;
+        const user = Auth.getUser();
+        const isOwner = this.ctxTarget?.ownerId === user?.id;
+        menu.innerHTML = '';
+        if ((Auth.isAdmin() || isOwner) && this.ctxTarget?.type === 'article')
+            menu.innerHTML += `<div class="ctx-item" onclick="App.ctxPin()"><i class="ti ti-pin"></i> Pin / Unpin</div>`;
+            menu.innerHTML += `<div class="ctx-item" onclick="App.ctxForward()"><i class="ti ti-share"></i> Forward</div>`;
+            menu.innerHTML += `<div class="ctx-item" onclick="App.ctxCopy()"><i class="ti ti-copy"></i> Copy link</div>`;
+        if (isOwner || Auth.isAdmin())
+            menu.innerHTML += `<div class="divider" style="margin:4px 0"></div><div class="ctx-item danger" onclick="App.ctxDelete()"><i class="ti ti-trash"></i> Delete</div>`;
+            menu.style.left = Math.min(e.clientX, window.innerWidth-180) + 'px';
+            menu.style.top  = Math.min(e.clientY, window.innerHeight-160) + 'px';
+            menu.classList.add('open');
+    },
+
+    async ctxPin() {
+        document.getElementById('ctx-menu')?.classList.remove('open');
+        const articles = await ArticlesAPI.list(this.currentGroupId);
+        const article  = articles?.data?.find(a => a.id == this.ctxTarget.id);
+        const res = article?.is_pinned == 1
+            ? await ArticlesAPI.unpin(this.ctxTarget.id)
+            : await ArticlesAPI.pin(this.ctxTarget.id);
+        if (res?.success) { this.showToast(article?.is_pinned==1?'Unpinned':'Article pinned!','ti-check'); await this.loadArticles(); }
+        else this.showToast(res?.message||'Failed','ti-alert-circle');
+    },
+
+    async unpinArticle(articleId) {
+        if (!articleId) return;
+        const res = await ArticlesAPI.unpin(articleId);
+        if (res?.success) {
+            this.showToast('Article unpinned','ti-check');
+            await this.loadArticles();
+        } else {
+            this.showToast(res?.message || 'Could not unpin article', 'ti-alert-circle');
+        }
+    },
+
+    ctxForward() { 
+        document.getElementById('ctx-menu')?.classList.remove('open');
+        if (this.ctxTarget)
+            this.openForwardModal(this.ctxTarget.type, this.ctxTarget.id);
+    },
+    ctxCopy() {
+        document.getElementById('ctx-menu')?.classList.remove('open');
+        const card = document.querySelector(`.article-card[data-article-id="${this.ctxTarget?.id}"]`);
+        const url  = card?.querySelector('a.article-preview')?.href;
+        if (url) {
+            navigator.clipboard?.writeText(url)
+                .then(() => this.showToast('Article link copied!', 'ti-copy'))
+                .catch(() => { prompt('Copy this link:', url); });
+        } else {
+            this.showToast('No link found', 'ti-alert-circle');
+        }
+    },
+    async ctxDelete() {
+        document.getElementById('ctx-menu')?.classList.remove('open');
+        if (!this.ctxTarget || !confirm('Delete this item?')) return;
+        const res = this.ctxTarget.type === 'article'
+            ? await ArticlesAPI.delete(this.ctxTarget.id)
+            : await MessagesAPI.delete(this.ctxTarget.id);
+        if (res?.success) { this.showToast('Deleted','ti-check'); this.ctxTarget.type==='article'?await this.loadArticles():await this.loadMessages(); }
+        else this.showToast(res?.message||'Failed','ti-alert-circle');
+    },
+
+    //facebook share
+    async shareOnFacebook(articleId) {
+        const id = articleId || (this.ctxTarget?.type === 'article' ? this.ctxTarget.id : null);
+        if (!id) {
+            this.showToast('Select an article first', 'ti-alert-circle');
+            return;
+        }
+
+        const articles = await ArticlesAPI.list(this.currentGroupId);
+        const article  = articles?.data?.find(a => a.id == id);
+        if (!article) {
+            this.showToast('Article not found', 'ti-alert-circle');
+            return;
+        }
+
+        const url = article.article_url || article.url || '';
+        if (!url) {
+            this.showToast('This article has no shareable URL', 'ti-alert-circle');
+            return;
+        }
+
+        const shareUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`;
+        window.open(shareUrl, '_blank', 'noopener');
+    },
+
+    // ─────────────────────────────────────────
+    // ARTICLE FILTER & PIN
+    // ─────────────────────────────────────────
+    _showPinnedOnly: false,
+
+    filterArticles(q) {
+        const feed = document.getElementById('tab-articles');
+        if (!feed) return;
+        const cards = feed.querySelectorAll('.article-card');
+        let visible = 0;
+        cards.forEach(card => {
+            const title = card.querySelector('.article-title-text')?.textContent?.toLowerCase() || '';
+            const src   = card.querySelector('.article-source')?.textContent?.toLowerCase() || '';
+            const auth  = this.allowAuthorFilter ? (card.querySelector('.article-author')?.textContent?.toLowerCase() || '') : '';
+            const matchQ   = !q || title.includes(q.toLowerCase()) || src.includes(q.toLowerCase()) || auth.includes(q.toLowerCase());
+            const matchPin = !this._showPinnedOnly || card.classList.contains('pinned');
+            const show = matchQ && matchPin;
+            card.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        let emptyEl = feed.querySelector('.filter-empty');
+        if (visible === 0 && cards.length > 0) {
+            if (!emptyEl) {
+                emptyEl = document.createElement('div');
+                emptyEl.className = 'empty-state filter-empty';
+                emptyEl.innerHTML = this._showPinnedOnly
+                    ? '<i class="ti ti-pin"></i><p>No pinned articles in this group</p>'
+                    : '<i class="ti ti-search"></i><p>No articles match your search</p>';
+                feed.appendChild(emptyEl);
+            }
+        } else if (emptyEl) emptyEl.remove();
+    },
+
+    togglePinnedOnly(btn) {
+        this._showPinnedOnly = !this._showPinnedOnly;
+        if (this._showPinnedOnly) {
+            btn.style.cssText += ';background:var(--accent-soft);border-color:var(--border-accent);color:var(--accent)';
+        } else {
+            btn.style.cssText += ';background:transparent;border-color:var(--border);color:var(--text-muted)';
+        }
+        const q = document.getElementById('article-search-input')?.value || '';
+        this.filterArticles(q);
+        this.showToast(this._showPinnedOnly ? 'Showing pinned articles only' : 'Showing all articles', 'ti-pin');
+    },
+
+    // ─────────────────────────────────────────
+    // MANAGE GROUP MODAL
+    // ─────────────────────────────────────────
+    async openManageGroupModal() {
+        console.log("opening the group manage modal");
+        document.getElementById('group-ctx-menu')?.classList.remove('open');
+        if (!this.currentGroupId) { this.showToast('Select a group first', 'ti-alert-circle'); return; }
+        if (!Auth.isAdmin())      { this.showToast('Only admins can manage groups', 'ti-lock'); return; }
+
+        const [groupRes, membersRes, articlesRes] = await Promise.all([
+            GroupsAPI.get(this.currentGroupId),
+            GroupsAPI.members(this.currentGroupId),
+            ArticlesAPI.list(this.currentGroupId),
+        ]);
+
+        if (!groupRes?.success) { this.showToast('Failed to load group details', 'ti-alert-circle'); return; }
+
+        const group    = groupRes.data;
+        const members  = membersRes?.data || [];
+        const articles = articlesRes?.data || [];
+
+        const initials = group.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
+        const avatarEl = document.getElementById('manage-group-avatar');
+        if (avatarEl) avatarEl.textContent = initials;
+
+        const titleEl = document.getElementById('manage-group-title');
+        if (titleEl) titleEl.textContent = group.name;
+
+        const metaEl = document.getElementById('manage-group-meta');
+        if (metaEl) metaEl.textContent = `${members.length} members · Created by ${group.creator_name || 'Admin'}`;
+
+        const nameInp = document.getElementById('manage-group-name');
+        if (nameInp) nameInp.value = group.name;
+
+        let desc = group.description || '';
+        try {
+            const parsed = JSON.parse(desc);
+            if (parsed.invite_token) desc = '';
+        } catch(e) {}
+        const descInp = document.getElementById('manage-group-desc');
+        console.log("description", descInp);
+
+        if (descInp) descInp.value = desc;
+
+        const statMembers  = document.getElementById('manage-stat-members');
+        const statArticles = document.getElementById('manage-stat-articles');
+        if (statMembers)  statMembers.textContent  = members.length;
+        if (statArticles) statArticles.textContent = articles.length;
+
+        const msgRes = await MessagesAPI.list(this.currentGroupId);
+        const statMessages = document.getElementById('manage-stat-messages');
+        if (statMessages) statMessages.textContent = msgRes?.data?.length || 0;
+
+        this.openModal('modal-manage-group');
+    },
+
+    async saveGroupSettings(e) {
+        e.preventDefault();
+        const name = document.getElementById('manage-group-name')?.value.trim();
+        const desc = document.getElementById('manage-group-desc')?.value.trim();
+        if (!name) { this.showToast('Group name is required', 'ti-alert-circle'); return; }
+
+        const btn = e.submitter;
+        if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+
+        const res = await GroupsAPI.update(this.currentGroupId, { name, description: desc });
+
+        if (btn) { btn.textContent = 'Save Changes'; btn.disabled = false; }
+
+        if (res?.success) {
+            this.currentGroupName = name;
+            const titleEl = document.getElementById('channel-title');
+            if (titleEl) titleEl.textContent = name;
+            const groupEl = document.querySelector(`.group-item[data-group-id="${this.currentGroupId}"] .group-name`);
+            if (groupEl) groupEl.textContent = name;
+            const manageTitleEl = document.getElementById('manage-group-title');
+            if (manageTitleEl) manageTitleEl.textContent = name;
+            this.closeAllModals();
+            this.showToast('Group settings saved!', 'ti-check');
+            await this.loadGroups();
+        } else {
+            this.showToast(res?.message || 'Failed to save', 'ti-alert-circle');
+        }
+    },
+
+    // ─────────────────────────────────────────
+    // DELETE GROUP
+    // ─────────────────────────────────────────
+    openDeleteGroupModal() {
+        document.getElementById('group-ctx-menu')?.classList.remove('open');
+        if (!this.currentGroupId) { this.showToast('Select a group first', 'ti-alert-circle'); return; }
+        if (!Auth.isAdmin()) { this.showToast('Only admins can delete groups', 'ti-lock'); return; }
+        const nameEl = document.getElementById('delete-group-name');
+        if (nameEl) nameEl.textContent = this.currentGroupName;
+        const inp = document.getElementById('delete-group-confirm-input');
+        if (inp) inp.value = '';
+        this.openModal('modal-delete-group');
+    },
+
+    async confirmDeleteGroup() {
+        const input = document.getElementById('delete-group-confirm-input')?.value.trim();
+        if (input !== this.currentGroupName) {
+            this.showToast('Group name does not match – type exactly to confirm', 'ti-alert-circle');
+            return;
+        }
+        const res = await GroupsAPI.delete(this.currentGroupId);
+        if (res?.success) {
+            this.closeAllModals();
+            this.showToast(`Group "${this.currentGroupName}" deleted`, 'ti-check');
+            this.currentGroupId = null; this.currentGroupName = null;
+            await this.loadGroups();
+        } else this.showToast(res?.message || 'Failed to delete group', 'ti-alert-circle');
+    },
+
+    // ─────────────────────────────────────────
+    // INVITE LINK
+    // ─────────────────────────────────────────
+    async openInviteLinkModal() {
+    document.getElementById('group-ctx-menu')?.classList.remove('open');
+    if (!this.currentGroupId) {
+        this.showToast('Select a group first', 'ti-alert-circle');
+        return;
+    }
+    const nameEl = document.getElementById('invite-link-group-name');
+    if (nameEl) nameEl.textContent = this.currentGroupName;
+
+    const urlEl = document.getElementById('invite-link-url');
+    if (urlEl) urlEl.textContent = 'Generating…';
+
+    this.openModal('modal-invite-link');
+
+    const res = await GroupsAPI.inviteLink(this.currentGroupId);
+    if (res?.success) {
+        if (urlEl) urlEl.textContent = res.data.link;
+    } else {
+        if (urlEl) urlEl.textContent = '';
+        this.showToast(res?.message || 'Failed to generate link', 'ti-alert-circle');
+    }
+},
+
+copyInviteLink() {
+    const url = document.getElementById('invite-link-url')?.textContent?.trim();
+    if (!url || url === 'Generating…' || url === 'Regenerating…' || url === '') {
+        this.showToast('Link not ready yet', 'ti-alert-circle');
+        return;
+    }
+    navigator.clipboard?.writeText(url)
+        .then(() => this.showToast('Invite link copied!', 'ti-copy'))
+        .catch(() => { prompt('Copy this invite link:', url); });
+},
+
+async regenerateInviteLink() {
+    const urlEl = document.getElementById('invite-link-url');
+    if (urlEl) urlEl.textContent = 'Regenerating…';
+    try {
+        const res = await GroupsAPI.inviteLink(this.currentGroupId);
+        if (res?.success) {
+            if (urlEl) urlEl.textContent = res.data.link;
+            this.showToast('New link generated!', 'ti-check');
+        } else {
+            if (urlEl) urlEl.textContent = '';
+            this.showToast(res?.message || 'Failed to regenerate link', 'ti-alert-circle');
+        }
+    } catch(e) {
+        if (urlEl) urlEl.textContent = '';
+        this.showToast('Something went wrong', 'ti-alert-circle');
+    }
+},
+
+shareInviteWhatsApp() {
+    const url = document.getElementById('invite-link-url')?.textContent?.trim();
+    if (!url || url === 'Generating…' || url === 'Regenerating…' || url === '') {
+        this.showToast('Link not ready yet', 'ti-alert-circle');
+        return;
+    }
+    window.open(
+        'https://wa.me/?text=' + encodeURIComponent(
+            `Join "${this.currentGroupName}" on ArticleHub: ${url}`
+        ),
+        '_blank'
+    );
+},
+    // ─────────────────────────────────────────
+    // GROUP CONTEXT MENU
+    // ─────────────────────────────────────────
+    showGroupCtxMenu(e, groupId, groupName) {
+        e.preventDefault(); e.stopPropagation();
+        this.currentGroupId   = groupId;
+        this.currentGroupName = groupName;
+        const menu = document.getElementById('group-ctx-menu');
+        if (!menu) return;
+        const deleteItem = document.getElementById('group-ctx-delete');
+        if (deleteItem) deleteItem.style.display = Auth.isAdmin() ? 'flex' : 'none';
+        menu.style.left = Math.min(e.clientX, window.innerWidth-190) + 'px';
+        menu.style.top  = Math.min(e.clientY, window.innerHeight-130) + 'px';
+        menu.classList.add('open');
+    },
+
+    // ─────────────────────────────────────────
+    // FILE ATTACHMENT
+    // ─────────────────────────────────────────
+    _selectedFile: null,
+
+    handleFileDrop(e) {
+        e.preventDefault();
+        const zone = document.getElementById('file-drop-zone');
+        if (zone) { zone.style.borderColor = 'var(--border)'; zone.style.background = ''; }
+        const file = e.dataTransfer?.files[0];
+        if (file) this.previewFile(file);
+    },
+
+    handleFileSelect(input) {
+        const file = input.files[0];
+        if (file) this.previewFile(file);
+    },
+
+    previewFile(file) {
+        if (file.size > 10 * 1024 * 1024) { this.showToast('File too large (max 10MB)', 'ti-alert-circle'); return; }
+        this._selectedFile = file;
+        const preview = document.getElementById('file-preview');
+        const nameEl  = document.getElementById('file-preview-name');
+        const sizeEl  = document.getElementById('file-preview-size');
+        const iconEl  = preview?.querySelector('i.ti');
+        if (nameEl) nameEl.textContent = file.name;
+        if (sizeEl) sizeEl.textContent = this.formatFileSize(file.size);
+        if (iconEl) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            iconEl.className = ext === 'pdf' ? 'ti ti-file-type-pdf' : file.type.startsWith('image/') ? 'ti ti-photo' : 'ti ti-file';
+        }
+        if (preview) preview.style.display = 'block';
+    },
+
+    clearFileSelection() {
+        this._selectedFile = null;
+        const preview = document.getElementById('file-preview');
+        if (preview) preview.style.display = 'none';
+        const input = document.getElementById('file-input');
+        if (input) input.value = '';
+    },
+
+    async sendFile() {
+        if (!this._selectedFile) { this.showToast('Please select a file first', 'ti-alert-circle'); return; }
+        if (!this.currentGroupId) { this.showToast('Select a group first', 'ti-alert-circle'); return; }
+        const caption = document.getElementById('file-caption')?.value.trim() || '';
+        const file    = this._selectedFile;
+        const ext     = file.name.split('.').pop().toUpperCase();
+        const btn     = document.getElementById('send-file-btn');
+
+        let icon = '📎';
+        if (file.type.startsWith('image/')) icon = '🖼️';
+        else if (ext === 'PDF') icon = '📄';
+        else if (['DOC','DOCX'].includes(ext)) icon = '📝';
+
+        let msg = `${icon} **${file.name}** (${this.formatFileSize(file.size)})`;
+        if (caption) msg += `\n${caption}`;
+
+        if (btn) { btn.innerHTML = '<i class="ti ti-loader"></i> Sending…'; btn.disabled = true; }
+        const res = await MessagesAPI.send(this.currentGroupId, msg, null);
+        if (btn) { btn.innerHTML = '<i class="ti ti-send"></i> Send File'; btn.disabled = false; }
+
+        if (res?.success) {
+            this.closeAllModals();
+            this.clearFileSelection();
+            const cap = document.getElementById('file-caption');
+            if (cap) cap.value = '';
+            this.showToast('File message sent!', 'ti-check');
+            document.querySelector('.tab[data-tab="tab-chat"]')?.click();
+        } else this.showToast(res?.message || 'Failed to send', 'ti-alert-circle');
+    },
+
+    formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+        return (bytes/(1024*1024)).toFixed(1) + ' MB';
+    },
+
+    // ─────────────────────────────────────────
+    // ONLINE / OFFLINE
+    // ─────────────────────────────────────────
+    initOnlineStatus() {
+        window.addEventListener('offline', () => {
+            this.showToast('You are offline', 'ti-wifi-off');
+        });
+        window.addEventListener('online', () => {
+            this.showToast('Back online!', 'ti-wifi');
+            if (this.currentGroupId) this.loadRightPanelMembers();
+        });
+        window.addEventListener('beforeunload', () => {
+            if (Auth.isLoggedIn()) {
+                navigator.sendBeacon && navigator.sendBeacon(getApiBase() + '/auth.php?action=logout');
+            }
+        });
+        setInterval(() => {
+            if (this.currentGroupId && navigator.onLine) this.loadRightPanelMembers();
+        }, 60000);
+    },
+
+    // ─────────────────────────────────────────
+    // TAB BAR
+    // ─────────────────────────────────────────
+    bindTabBar() {
+        this._setTabState('tab-articles');
+        document.querySelectorAll('.tab[data-tab]').forEach(tab => {
+            tab.addEventListener('click', async () => {
+                tab.closest('.tab-bar').querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                tab.closest('.page')?.querySelectorAll('.tab-panel').forEach(p => {
+                    p.style.display = p.id === tab.dataset.tab ? '' : 'none';
+                });
+                this._setTabState(tab.dataset.tab);
+                if (tab.dataset.tab === 'tab-chat') {
+                    await this.loadMessages();
+                    setTimeout(() => {
+                        const feed = document.getElementById('msg-feed');
+                        const panel = feed?.closest('.center-panel');
+                        if (panel) panel.scrollTop = panel.scrollHeight;
+                    }, 100);
+                }
+            });
+        });
+    },
+
+    _setTabState(tabId) {
+        const isArticles = tabId === 'tab-articles';
+        const shareBar   = document.querySelector('.share-article-bar');
+        const ogPreview  = document.getElementById('og-preview');
+        const filterBar  = document.getElementById('article-filter-bar');
+        const msgInput   = document.getElementById('message-input-bar');
+        if (shareBar)  shareBar.style.display  = isArticles ? '' : 'none';
+        if (ogPreview && !isArticles) { ogPreview.innerHTML = ''; ogPreview.style.display = 'none'; }
+        if (filterBar) filterBar.style.display = isArticles ? 'flex' : 'none';
+        if (msgInput)  msgInput.style.display  = isArticles ? 'none' : '';
+    },
+
+    // ─────────────────────────────────────────
+    // TOAST
+    // ─────────────────────────────────────────
+    showToast(msg, icon = 'ti-info-circle') {
+        const container = document.getElementById('toast-container'); if (!container) return;
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.innerHTML = `<i class="ti ${icon}"></i> ${msg}`;
+        container.appendChild(toast);
+        setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity 0.3s'; setTimeout(()=>toast.remove(),300); }, 2800);
+    },
+
+    // ─────────────────────────────────────────
+    // UTILS
+    // ─────────────────────────────────────────
+    esc(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    },
+    timeAgo(dateStr) {
+        const d = Math.floor((Date.now()-new Date(dateStr).getTime())/1000);
+        if (d < 60)    return 'just now';
+        if (d < 3600)  return Math.floor(d/60)+'m ago';
+        if (d < 86400) return Math.floor(d/3600)+'h ago';
+        return Math.floor(d/86400)+'d ago';
+    },
+    formatTime(dateStr) {
+        return new Date(dateStr).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    },
+};
+
+document.addEventListener('DOMContentLoaded', () => App.init());
