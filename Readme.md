@@ -1,10 +1,10 @@
 # ArticleHub
 
-A lightweight editorial collaboration dashboard where teams can share articles, chat in real time, and manage group workspaces — all in one place.
+A lightweight editorial collaboration dashboard where teams can share articles, chat in real time, and manage group workspaces - all in one place.
 
 # What it does
 
-ArticleHub lets journalists, editors, and content teams stay on the same page. Members join groups, share article links for discussion, and chat — with admins controlling access and settings.
+ArticleHub lets journalists, editors, and content teams stay on the same page. Members join groups, share article links for discussion, and chat - with admins controlling access and settings.
 
 #Core features
 
